@@ -1,0 +1,24 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(cd \"C:\\\\Users\\\\Lenovo\\\\brewcast\"; Get-ChildItem -Recurse -File | Where-Object { $_.FullName -notmatch 'node_modules|\\\\.next' } | Select-Object -ExpandProperty FullName | ForEach-Object { $_.Replace\\('C:\\\\Users\\\\Lenovo\\\\brewcast\\\\', ''\\) } | Sort-Object)",
+      "PowerShell(New-Item *)",
+      "PowerShell(Get-ChildItem \"C:\\\\Users\\\\Lenovo\\\\brewcast\\\\app\" -Recurse -File | Where-Object { $_.FullName -notmatch '\\\\.next' } | ForEach-Object { $_.FullName.Replace\\('C:\\\\Users\\\\Lenovo\\\\brewcast\\\\', ''\\) } | Sort-Object)",
+      "PowerShell(node -e \"console.log\\(require\\('C:/Users/Lenovo/brewcast/node_modules/react-markdown/package.json'\\).version\\)\")",
+      "PowerShell(Select-String -Path \"C:\\\\Users\\\\Lenovo\\\\brewcast\\\\node_modules\\\\react-markdown\\\\package.json\" -Pattern '\"type\"|\"main\"|\"module\"|\"exports\"' | Select-Object -First 8 | ForEach-Object { $_.Line })",
+      "PowerShell(Select-String -Path \"C:\\\\Users\\\\Lenovo\\\\brewcast\\\\node_modules\\\\react-markdown\\\\index.js\" -Pattern \"export\" | Select-Object -First 10 | ForEach-Object { $_.Line })",
+      "PowerShell(node -e \"const p = require\\('C:/Users/Lenovo/brewcast/node_modules/react-markdown/package.json'\\); console.log\\(JSON.stringify\\(p.dependencies, null, 2\\)\\)\")",
+      "Bash(npx tsc *)",
+      "Bash(npx next *)",
+      "Bash(Remove-Item -Recurse -Force .next -ErrorAction SilentlyContinue)",
+      "Bash(node -e \"require\\('tailwindcss'\\); console.log\\('ok'\\)\")",
+      "Bash(node -e \"require\\('postcss'\\); console.log\\('ok'\\)\")",
+      "Bash(curl -s \"http://localhost:3001/_next/static/css/app/layout.css?v=1778653802040\")",
+      "Bash(curl -s \"http://localhost:3001/chat\")",
+      "Bash(node *)",
+      "Bash(dir .next)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:3001/)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:3000/)"
+    ]
+  }
+}

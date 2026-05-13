@@ -1,0 +1,36 @@
+name: Queue Processor
+
+on:
+  schedule:
+    # Every 5 minutes. GitHub may delay slightly on free plans — acceptable
+    # because the endpoint is idempotent and uses scheduled_at for precision.
+    - cron: '*/5 * * * *'
+  # Manual trigger for testing from the Actions tab
+  workflow_dispatch:
+
+jobs:
+  process:
+    name: Process publish queue
+    runs-on: ubuntu-latest
+    # Hard cap slightly under 5 min so back-to-back runs don't overlap
+    timeout-minutes: 4
+
+    steps:
+      - name: Call /api/queue/process
+        env:
+          APP_URL: ${{ secrets.APP_URL }}
+          QUEUE_SECRET: ${{ secrets.QUEUE_SECRET }}
+        run: |
+          response=$(curl -s -w "\n%{http_code}" -X GET \
+            -H "Authorization: Bearer ${QUEUE_SECRET}" \
+            -H "Accept: application/json" \
+            "${APP_URL}/api/queue/process")
+
+          body=$(echo "$response" | head -n -1)
+          status=$(echo "$response" | tail -n 1)
+
+          echo "HTTP $status"
+          echo "$body" | python3 -m json.tool 2>/dev/null || echo "$body"
+
+          # Fail the step (and the run) if the endpoint returned an error
+          [ "$status" -ge 200 ] && [ "$status" -lt 300 ]
