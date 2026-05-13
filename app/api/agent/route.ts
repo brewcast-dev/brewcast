@@ -222,36 +222,22 @@ function buildTools(ctx: {
         const width = 1080
         const height = aspect === 'portrait' ? 1920 : 1080
 
-        const res = await fetch('https://api.pixazo.ai/v1/text-to-image', {
+        const res = await fetch('https://gateway.pixazo.ai/flux-1-schnell/v1/getData', {
           method: 'POST',
-          headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            prompt: `${prompt}, ${style}`,
-            width,
-            height,
-            model: 'flux-schnell',
-            num_images: 1,
-          }),
+          headers: {
+            'Ocp-Apim-Subscription-Key': apiKey,
+            'Content-Type': 'application/json',
+            'Cache-Control': 'no-cache',
+          },
+          body: JSON.stringify({ prompt: `${prompt}, ${style}`, num_steps: 4, width, height }),
         })
         if (!res.ok) return { error: `Pixazo error ${res.status}: ${await res.text()}` }
 
-        const json = await res.json() as {
-          images?: Array<{ url?: string; b64_json?: string }>
-          data?: Array<{ url?: string; b64_json?: string }>
-          url?: string
-        }
+        const json = await res.json() as { output?: string }
+        const imageUrl = json.output
+        if (!imageUrl) return { error: 'Pixazo returned no output URL' }
 
-        const item = json.images?.[0] ?? json.data?.[0]
-        let imageBuffer: Buffer | undefined
-
-        if (item?.b64_json) {
-          imageBuffer = Buffer.from(item.b64_json, 'base64')
-        } else {
-          const imageUrl = item?.url ?? json.url
-          if (!imageUrl) return { error: 'Pixazo returned no image data' }
-          imageBuffer = await fetchBuffer(imageUrl)
-        }
-
+        const imageBuffer = await fetchBuffer(imageUrl)
         const storagePath = `media/${Date.now()}-generated.jpg`
         const publicUrl = await uploadToStorage(supabase, imageBuffer, storagePath, 'image/jpeg')
         return { public_url: publicUrl, width, height }

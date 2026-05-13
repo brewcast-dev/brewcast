@@ -5,6 +5,14 @@ export type PostStatus = 'draft' | 'approved' | 'queued' | 'published' | 'failed
 export type Platform = 'instagram' | 'facebook' | 'both'
 export type ContentType = 'post' | 'reel' | 'story'
 
+export interface InspirationCaption {
+  caption: string
+  likes: number
+  comments: number
+  mediaType: string
+  timestamp: string
+}
+
 export interface Brewery {
   id: string
   name: string | null
@@ -16,6 +24,8 @@ export interface Brewery {
   tone_of_voice: string | null
   logo_url: string | null
   ig_handle: string | null
+  content_style: string | null
+  inspiration_captions: InspirationCaption[] | null
   created_at: string
 }
 
