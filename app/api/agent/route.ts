@@ -9,6 +9,7 @@ import {
   type LanguageModelMiddleware,
   type UIMessage,
 } from 'ai'
+import type { LanguageModelV3StreamPart } from '@ai-sdk/provider'
 import { google } from '@ai-sdk/google'
 import { groq } from '@ai-sdk/groq'
 import { z } from 'zod'
@@ -21,28 +22,91 @@ import os from 'os'
 import path from 'path'
 import crypto from 'crypto'
 
-// ─── Gemini → Groq fallback on 429 ──────────────────────────────────────────
+// ─── Gemini → Groq fallback on 429 / rate-limit ─────────────────────────────
 
 const groqFallback = groq('llama-3.3-70b-versatile')
 
+// Walk the full cause chain — AISDKError wraps the original HTTP error as .cause
 function is429(error: unknown): boolean {
-  const e = error as { statusCode?: number; status?: number; message?: string }
-  return (
-    e?.statusCode === 429 ||
-    e?.status === 429 ||
-    (typeof e?.message === 'string' && e.message.includes('429'))
-  )
+  if (error == null || typeof error !== 'object') return false
+  const e = error as Record<string, unknown>
+  // Direct status code check (APICallError uses .statusCode, not .status)
+  if (e.statusCode === 429 || e.status === 429) return true
+  // Message patterns: plain "429", "rate limit", "quota exceeded", "RESOURCE_EXHAUSTED"
+  const msg = typeof e.message === 'string' ? e.message : ''
+  if (/429|rate.?limit|quota.?exceed|resource.?exhausted/i.test(msg)) return true
+  // Recurse into nested cause
+  return e.cause != null && is429(e.cause)
 }
 
 const geminiGroqFallbackMiddleware: LanguageModelMiddleware = {
   specificationVersion: 'v3',
+
+  // ── streaming (main chat) ───────────────────────────────────────────────────
   wrapStream: async ({ doStream, params }) => {
+    // Path A: 429 arrives as an HTTP error before the stream opens (most common).
+    // doStream() throws an APICallError with statusCode 429.
+    let geminiResult: Awaited<ReturnType<typeof doStream>>
     try {
-      return await doStream()
+      geminiResult = await doStream()
     } catch (err) {
       if (is429(err)) {
-        console.log('[BrewCast] Gemini 429 — retrying with Groq fallback')
-        return await groqFallback.doStream(params)
+        console.log('[BrewCast] Gemini 429 on connect — switching to Groq llama-3.3-70b-versatile')
+        return groqFallback.doStream(params)
+      }
+      throw err
+    }
+
+    // Path B: 429 arrives as a { type: 'error' } chunk inside the SSE stream.
+    // Wrap the Gemini stream; on seeing the error chunk, drain the rest from Groq.
+    const { stream, ...rest } = geminiResult
+    const wrappedStream = new ReadableStream<LanguageModelV3StreamPart>({
+      async start(controller) {
+        const reader = stream.getReader()
+        try {
+          while (true) {
+            const { done, value } = await reader.read()
+            if (done) { controller.close(); break }
+
+            if (value.type === 'error' && is429(value.error)) {
+              reader.cancel()
+              console.log('[BrewCast] Gemini 429 in stream — switching to Groq llama-3.3-70b-versatile')
+              const groqResult = await groqFallback.doStream(params)
+              const groqReader = groqResult.stream.getReader()
+              try {
+                while (true) {
+                  const { done: d, value: v } = await groqReader.read()
+                  if (d) break
+                  controller.enqueue(v)
+                }
+                controller.close()
+              } finally {
+                groqReader.releaseLock()
+              }
+              break
+            }
+
+            controller.enqueue(value)
+          }
+        } catch (err) {
+          controller.error(err)
+        } finally {
+          reader.releaseLock()
+        }
+      },
+    })
+
+    return { ...rest, stream: wrappedStream }
+  },
+
+  // ── non-streaming (generateText / generateObject inside tools) ─────────────
+  wrapGenerate: async ({ doGenerate, params }) => {
+    try {
+      return await doGenerate()
+    } catch (err) {
+      if (is429(err)) {
+        console.log('[BrewCast] Gemini 429 on generate — switching to Groq llama-3.3-70b-versatile')
+        return groqFallback.doGenerate(params)
       }
       throw err
     }
