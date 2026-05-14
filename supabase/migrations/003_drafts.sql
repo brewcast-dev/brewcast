@@ -17,4 +17,5 @@ create table if not exists drafts (
 
 -- RLS: enable but open to service-role for now (tighten per user auth later)
 alter table drafts enable row level security;
+drop policy if exists "service role full access" on drafts;
 create policy "service role full access" on drafts using (true) with check (true);
