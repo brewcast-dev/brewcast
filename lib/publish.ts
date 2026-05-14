@@ -49,7 +49,11 @@ export async function publishPost(
   if (!igUserId || !accessToken) throw new Error('Meta credentials not configured')
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let query: any = supabase.from('posts').select('*').eq('id', postId)
+  let query: any = supabase
+    .from('posts')
+    .select('*')
+    .eq('id', postId)
+    .is('archived_at', null) // never publish archived rows
   if (!options.allowAnyStatus) {
     // Atomic claim: only proceed if the post is still queued.
     // Prevents double-publish when pg-boss + Supabase fallback run together.
@@ -61,8 +65,8 @@ export async function publishPost(
 
   const { data: post } = await query.maybeSingle()
   if (!post) {
-    if (options.allowAnyStatus) throw new Error('Post not found or already published')
-    return { metaPostIds: [] } // already published, failed, or not found
+    if (options.allowAnyStatus) throw new Error('Post not found, archived, or already published')
+    return { metaPostIds: [] } // already published, failed, archived, or not found
   }
 
   const p = post as Post

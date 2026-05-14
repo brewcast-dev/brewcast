@@ -76,7 +76,7 @@ export default function UploadDraftReview({ draft }: { draft: UploadDraft }) {
   const displayImage = draft.edited_image_url ?? draft.image_url
   const isArchived = !!draft.archived_at
   const canEdit = draft.status !== 'published' && draft.status !== 'queued' && !isArchived
-  const canArchive = !isArchived && draft.status !== 'queued'
+  const canArchive = !isArchived
   const canPublishNow = draft.status !== 'published' && !isArchived
 
   return (

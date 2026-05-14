@@ -44,6 +44,7 @@ export async function GET(req: NextRequest) {
     .from('posts')
     .select('id')
     .eq('status', 'queued')
+    .is('archived_at', null) // skip archived rows
     .lte('scheduled_at', new Date().toISOString())
 
   for (const { id } of duePosts ?? []) {

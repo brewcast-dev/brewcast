@@ -63,7 +63,7 @@ export default function PostReview({ post }: { post: Post }) {
   const statusStyle = STATUS_STYLES[post.status] ?? 'bg-zinc-700 text-zinc-300'
   const isArchived = !!post.archived_at
   const canEdit = post.status !== 'published' && !isArchived
-  const canArchive = !isArchived && post.status !== 'queued'
+  const canArchive = !isArchived
   const canPublishNow = post.status !== 'published' && !isArchived
 
   return (
