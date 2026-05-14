@@ -237,19 +237,15 @@ function ProgressStep({
 
 // ─── Scoring helper — pick best N photos ─────────────────────────────────────
 
-async function scoreAndSelect(
+// Concurrency-limited photo analysis. Used by both auto (scoreAndSelect) and
+// manual (analyzeSelected) flows. Gemini free tier is ~15 RPM so we cap at 3.
+async function analyzePhotos(
   photos: BreweryPhoto[],
-  count: number,
 ): Promise<{ photo: BreweryPhoto; analysis: PhotoAnalysis }[]> {
-  // Cap candidates and limit concurrency — Gemini free tier is ~15 RPM,
-  // hammering with 20 parallel calls trips rate-limits and fails the whole batch.
   const CONCURRENCY = 3
-  // Score at most the number of posts wanted + a small pool for variety
-  const candidates = photos.slice(0, Math.min(photos.length, Math.max(count + 4, 8)))
-
   const results: PromiseSettledResult<{ photo: BreweryPhoto; analysis: PhotoAnalysis }>[] = []
-  for (let i = 0; i < candidates.length; i += CONCURRENCY) {
-    const chunk = candidates.slice(i, i + CONCURRENCY)
+  for (let i = 0; i < photos.length; i += CONCURRENCY) {
+    const chunk = photos.slice(i, i + CONCURRENCY)
     const chunkResults = await Promise.allSettled(
       chunk.map(async (photo) => {
         const res = await fetch('/api/ai/analyze-photo', {
@@ -273,21 +269,32 @@ async function scoreAndSelect(
   const failures = results.filter((r) => r.status === 'rejected')
   if (failures.length > 0) {
     console.warn(
-      `[scoreAndSelect] ${failures.length}/${results.length} analyses failed.`,
+      `[analyzePhotos] ${failures.length}/${results.length} analyses failed.`,
       (failures[0] as PromiseRejectedResult).reason,
     )
   }
 
-  const scored = results
+  const ok = results
     .filter((r): r is PromiseFulfilledResult<{ photo: BreweryPhoto; analysis: PhotoAnalysis }> =>
       r.status === 'fulfilled',
     )
     .map((r) => r.value)
-    .sort((a, b) => b.analysis.score - a.analysis.score)
 
-  if (scored.length === 0) {
-    throw new Error('All photo analyses failed — check the server console for the underlying Gemini/Groq error.')
+  if (ok.length === 0) {
+    throw new Error('All photo analyses failed — check the server console for the underlying Gemini/Groq/Mistral error.')
   }
+  return ok
+}
+
+// Auto mode: score a pool of candidates and pick the top N with filter variety.
+async function scoreAndSelect(
+  photos: BreweryPhoto[],
+  count: number,
+): Promise<{ photo: BreweryPhoto; analysis: PhotoAnalysis }[]> {
+  const candidates = photos.slice(0, Math.min(photos.length, Math.max(count + 4, 8)))
+  const scored = (await analyzePhotos(candidates)).sort(
+    (a, b) => b.analysis.score - a.analysis.score,
+  )
 
   // Ensure variety by avoiding duplicate filters when possible
   const selected: typeof scored = []
@@ -304,18 +311,37 @@ async function scoreAndSelect(
 
 // ─── Main page ────────────────────────────────────────────────────────────────
 
+type Mode = 'auto' | 'manual'
+
 export default function UploadPage() {
   const [phase, setPhase] = useState<Phase>('setup')
+  const [mode, setMode] = useState<Mode>('auto')
   const [photos, setPhotos] = useState<BreweryPhoto[]>([])
   const [photosLoading, setPhotosLoading] = useState(true)
   const [photosError, setPhotosError] = useState<string | null>(null)
   const [postCount, setPostCount] = useState(3)
+  const [selectedNames, setSelectedNames] = useState<Set<string>>(new Set())
   const [drafts, setDrafts] = useState<DraftCard[]>([])
   const [progressSteps, setProgressSteps] = useState<{ label: string; done: boolean }[]>([])
   const [activeStep, setActiveStep] = useState(0)
   const [toast, setToast] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const canvasWorkRef = useRef<HTMLCanvasElement | null>(null)
+
+  const togglePhotoSelection = useCallback((name: string) => {
+    setSelectedNames((prev) => {
+      const next = new Set(prev)
+      if (next.has(name)) next.delete(name)
+      else if (next.size < 10) next.add(name)
+      return next
+    })
+  }, [])
+
+  // When switching modes, clear out the mode-specific state
+  const switchMode = useCallback((next: Mode) => {
+    setMode(next)
+    setSelectedNames(new Set())
+  }, [])
 
   // Load photo library on mount
   useEffect(() => {
@@ -365,12 +391,32 @@ export default function UploadPage() {
 
   // ── Full generation pipeline ──────────────────────────────────────────────
   const handleGenerate = useCallback(async () => {
+    // Resolve which photos to process based on mode
+    let inputPhotos: BreweryPhoto[]
+    let targetCount: number
+    if (mode === 'manual') {
+      inputPhotos = photos.filter((p) => selectedNames.has(p.name))
+      targetCount = inputPhotos.length
+      if (targetCount === 0) {
+        setToast('Pick at least one photo first.')
+        return
+      }
+    } else {
+      inputPhotos = photos
+      targetCount = postCount
+    }
+
     setPhase('generating')
 
+    const firstStepLabel =
+      mode === 'manual'
+        ? `Analysing ${targetCount} selected photo${targetCount !== 1 ? 's' : ''}…`
+        : 'Scoring photos with Gemini Vision…'
+
     const steps = [
-      { label: 'Scoring photos with Gemini Vision…', done: false },
-      ...Array.from({ length: postCount }, (_, i) => ({
-        label: `Generating post ${i + 1}/${postCount}…`,
+      { label: firstStepLabel, done: false },
+      ...Array.from({ length: targetCount }, (_, i) => ({
+        label: `Generating post ${i + 1}/${targetCount}…`,
         done: false,
       })),
       { label: 'Uploading edited images…', done: false },
@@ -379,8 +425,11 @@ export default function UploadPage() {
     setActiveStep(0)
 
     try {
-      // Step 0: score + select photos
-      const selected = await scoreAndSelect(photos, postCount)
+      // Step 0: get analyses for the chosen photos
+      const selected =
+        mode === 'manual'
+          ? await analyzePhotos(inputPhotos)
+          : await scoreAndSelect(inputPhotos, targetCount)
       setProgressSteps((prev) => {
         const next = [...prev]
         next[0] = { ...next[0], done: true }
@@ -444,7 +493,7 @@ export default function UploadPage() {
       setToast(`Generation failed: ${(err as Error).message}`)
       setPhase('setup')
     }
-  }, [photos, postCount, renderAndUploadFiltered])
+  }, [mode, photos, postCount, selectedNames, renderAndUploadFiltered])
 
   // ── Save all drafts ────────────────────────────────────────────────────────
   const handleSaveAll = useCallback(async () => {
@@ -534,20 +583,60 @@ export default function UploadPage() {
             <div>
               <h1 className="text-2xl font-bold text-zinc-100">Quick Post Generator</h1>
               <p className="text-zinc-400 text-sm mt-1">
-                AI selects your best photos, applies filters, and writes captions — you just review.
+                Let BrewCast pick the best photos for you, or hand-pick the ones you want.
               </p>
             </div>
 
-            {/* Photo library preview */}
+            {/* Mode toggle */}
+            <div className="grid grid-cols-2 gap-2 rounded-2xl border border-zinc-800 bg-zinc-900 p-1.5">
+              <button
+                onClick={() => switchMode('auto')}
+                className={`px-4 py-3 rounded-xl text-sm font-medium transition-colors text-left ${
+                  mode === 'auto'
+                    ? 'bg-amber-500 text-zinc-950'
+                    : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800'
+                }`}
+              >
+                <div className="font-semibold">Let BrewCast pick the best fit</div>
+                <div className={`text-xs mt-0.5 ${mode === 'auto' ? 'text-zinc-900' : 'text-zinc-500'}`}>
+                  Choose how many posts to be drafted
+                </div>
+              </button>
+              <button
+                onClick={() => switchMode('manual')}
+                className={`px-4 py-3 rounded-xl text-sm font-medium transition-colors text-left ${
+                  mode === 'manual'
+                    ? 'bg-amber-500 text-zinc-950'
+                    : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800'
+                }`}
+              >
+                <div className="font-semibold">I&apos;ll pick the photos myself</div>
+                <div className={`text-xs mt-0.5 ${mode === 'manual' ? 'text-zinc-900' : 'text-zinc-500'}`}>
+                  Multi-select up to 10 photos from the library
+                </div>
+              </button>
+            </div>
+
+            {/* Photo library */}
             <div>
-              <h2 className="text-sm font-semibold text-zinc-300 uppercase tracking-wider mb-3">
-                Photo Library
-                {!photosLoading && photos.length > 0 && (
-                  <span className="ml-2 text-zinc-500 font-normal normal-case">
-                    ({photos.length} photos)
-                  </span>
+              <div className="flex items-baseline justify-between mb-3">
+                <h2 className="text-sm font-semibold text-zinc-300 uppercase tracking-wider">
+                  Photo Library
+                  {!photosLoading && photos.length > 0 && (
+                    <span className="ml-2 text-zinc-500 font-normal normal-case">
+                      ({photos.length} photos)
+                    </span>
+                  )}
+                </h2>
+                {mode === 'manual' && selectedNames.size > 0 && (
+                  <button
+                    onClick={() => setSelectedNames(new Set())}
+                    className="text-xs text-zinc-500 hover:text-zinc-300 transition-colors"
+                  >
+                    Clear selection ({selectedNames.size})
+                  </button>
                 )}
-              </h2>
+              </div>
 
               {photosLoading && (
                 <div className="flex items-center gap-2 text-zinc-500 text-sm">
@@ -573,58 +662,108 @@ export default function UploadPage() {
 
               {!photosLoading && photos.length > 0 && (
                 <div className="grid grid-cols-4 sm:grid-cols-6 lg:grid-cols-8 gap-2">
-                  {photos.slice(0, 32).map((photo) => (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img
-                      key={photo.name}
-                      src={photo.url}
-                      alt={photo.name}
-                      className="aspect-square w-full object-cover rounded-lg border border-zinc-800"
-                    />
-                  ))}
-                  {photos.length > 32 && (
-                    <div className="aspect-square w-full rounded-lg border border-zinc-800 bg-zinc-900 flex items-center justify-center text-xs text-zinc-500">
-                      +{photos.length - 32}
-                    </div>
-                  )}
+                  {photos.map((photo) => {
+                    const isSelected = selectedNames.has(photo.name)
+                    const interactive = mode === 'manual'
+                    return (
+                      <button
+                        key={photo.name}
+                        type="button"
+                        onClick={() => {
+                          if (interactive) togglePhotoSelection(photo.name)
+                        }}
+                        disabled={!interactive && !isSelected}
+                        className={`group relative aspect-square w-full overflow-hidden rounded-lg border transition-all ${
+                          isSelected
+                            ? 'border-amber-500 ring-2 ring-amber-500/40'
+                            : 'border-zinc-800 hover:border-zinc-600'
+                        } ${interactive ? 'cursor-pointer' : 'cursor-default'}`}
+                        aria-pressed={interactive ? isSelected : undefined}
+                      >
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={photo.url}
+                          alt={photo.name}
+                          className={`w-full h-full object-cover transition-opacity ${
+                            interactive && !isSelected ? 'opacity-80 group-hover:opacity-100' : ''
+                          }`}
+                        />
+                        {interactive && (
+                          <div
+                            className={`absolute top-1.5 right-1.5 w-5 h-5 rounded-full border-2 flex items-center justify-center text-xs font-bold transition-all ${
+                              isSelected
+                                ? 'border-amber-400 bg-amber-500 text-zinc-950'
+                                : 'border-white/60 bg-black/30 text-transparent group-hover:border-white'
+                            }`}
+                          >
+                            ✓
+                          </div>
+                        )}
+                      </button>
+                    )
+                  })}
                 </div>
               )}
             </div>
 
-            {/* Post count input + generate */}
-            <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-6 flex flex-col sm:flex-row items-start sm:items-center gap-6">
-              <div className="flex flex-col gap-1.5 flex-1">
-                <label htmlFor="post-count" className="text-sm font-medium text-zinc-200">
-                  How many posts do you want to create today?
-                </label>
-                <p className="text-xs text-zinc-500">
-                  AI will pick the best {postCount} photo{postCount !== 1 ? 's' : ''}, apply filters,
-                  and write captions automatically.
-                </p>
-              </div>
+            {/* Action bar */}
+            {mode === 'auto' ? (
+              <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-6 flex flex-col sm:flex-row items-start sm:items-center gap-6">
+                <div className="flex flex-col gap-1.5 flex-1">
+                  <label htmlFor="post-count" className="text-sm font-medium text-zinc-200">
+                    Let BrewCast pick the best fit — choose how many posts to be drafted
+                  </label>
+                  <p className="text-xs text-zinc-500">
+                    AI will pick the best {postCount} photo{postCount !== 1 ? 's' : ''}, apply filters,
+                    and write captions automatically.
+                  </p>
+                </div>
 
-              <div className="flex items-center gap-3">
-                <input
-                  id="post-count"
-                  type="number"
-                  min={1}
-                  max={10}
-                  value={postCount}
-                  onChange={(e) => {
-                    const v = Math.min(10, Math.max(1, parseInt(e.target.value) || 1))
-                    setPostCount(v)
-                  }}
-                  className="w-20 text-center rounded-xl border border-zinc-700 bg-zinc-800 text-zinc-100 text-xl font-bold py-2 focus:outline-none focus:border-amber-500"
-                />
+                <div className="flex items-center gap-3">
+                  <input
+                    id="post-count"
+                    type="number"
+                    min={1}
+                    max={10}
+                    value={postCount}
+                    onChange={(e) => {
+                      const v = Math.min(10, Math.max(1, parseInt(e.target.value) || 1))
+                      setPostCount(v)
+                    }}
+                    className="w-20 text-center rounded-xl border border-zinc-700 bg-zinc-800 text-zinc-100 text-xl font-bold py-2 focus:outline-none focus:border-amber-500"
+                  />
+                  <button
+                    onClick={handleGenerate}
+                    disabled={photos.length === 0 || photosLoading}
+                    className="px-6 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 disabled:opacity-40 disabled:cursor-not-allowed text-zinc-950 font-semibold text-sm transition-colors"
+                  >
+                    Generate
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-6 flex flex-col sm:flex-row items-start sm:items-center gap-6">
+                <div className="flex flex-col gap-1.5 flex-1">
+                  <p className="text-sm font-medium text-zinc-200">
+                    {selectedNames.size === 0
+                      ? 'Tap photos above to add them to your batch'
+                      : `${selectedNames.size} photo${selectedNames.size !== 1 ? 's' : ''} selected`}
+                  </p>
+                  <p className="text-xs text-zinc-500">
+                    BrewCast will analyse each selected photo, suggest a filter, and write a caption.
+                    {selectedNames.size >= 10 && ' (Max 10 reached)'}
+                  </p>
+                </div>
+
                 <button
                   onClick={handleGenerate}
-                  disabled={photos.length === 0 || photosLoading}
+                  disabled={selectedNames.size === 0 || photosLoading}
                   className="px-6 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 disabled:opacity-40 disabled:cursor-not-allowed text-zinc-950 font-semibold text-sm transition-colors"
                 >
-                  Generate
+                  Generate {selectedNames.size > 0 && `(${selectedNames.size})`}
                 </button>
               </div>
-            </div>
+            )}
           </div>
         )}
 
