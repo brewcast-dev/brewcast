@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server'
+import { revalidatePath } from 'next/cache'
 import { createAdminClient } from '@/lib/supabase'
 
 export interface DraftInsert {
@@ -46,5 +47,6 @@ export async function POST(req: Request) {
   }
 
   const ids = (data ?? []).map((r: { id: string }) => r.id)
+  revalidatePath('/drafts')
   return NextResponse.json({ ids, count: ids.length })
 }

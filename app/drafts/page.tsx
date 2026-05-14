@@ -3,6 +3,12 @@ import { createAdminClient } from '@/lib/supabase'
 import type { Post } from '@/types/database'
 import DraftCard, { type DraftItem } from './_components/DraftCard'
 
+// Never cache this page — rows inserted via /upload's bulk-save route handler
+// need to appear immediately, and Next's route segment cache otherwise serves
+// stale HTML on Vercel.
+export const dynamic = 'force-dynamic'
+export const revalidate = 0
+
 const STATUS_TABS = [
   { label: 'All',       value: 'all'       },
   { label: 'Draft',     value: 'draft'     },

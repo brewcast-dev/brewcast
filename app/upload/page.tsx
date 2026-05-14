@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, useCallback } from 'react'
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 import type { BreweryPhoto } from '@/app/api/upload/photos/route'
 import type { PhotoAnalysis } from '@/app/api/ai/analyze-photo/route'
 import type { CaptionResult } from '@/app/api/ai/generate-caption/route'
@@ -314,6 +315,7 @@ async function scoreAndSelect(
 type Mode = 'auto' | 'manual'
 
 export default function UploadPage() {
+  const router = useRouter()
   const [phase, setPhase] = useState<Phase>('setup')
   const [mode, setMode] = useState<Mode>('auto')
   const [photos, setPhotos] = useState<BreweryPhoto[]>([])
@@ -529,13 +531,16 @@ export default function UploadPage() {
       }
 
       const { count } = await res.json() as { count: number }
-      setToast(`${count} draft${count !== 1 ? 's' : ''} saved — view in /drafts`)
+      setToast(`${count} draft${count !== 1 ? 's' : ''} saved — opening /drafts…`)
+      // Refresh the router cache so /drafts re-fetches, then navigate.
+      router.refresh()
+      setTimeout(() => router.push('/drafts'), 800)
     } catch (err) {
       setToast(`Error: ${String(err)}`)
     } finally {
       setSaving(false)
     }
-  }, [drafts, renderAndUploadFiltered])
+  }, [drafts, renderAndUploadFiltered, router])
 
   // ─── Render ──────────────────────────────────────────────────────────────────
 

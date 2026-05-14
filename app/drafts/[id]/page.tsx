@@ -5,6 +5,9 @@ import type { Post } from '@/types/database'
 import PostReview from './_components/PostReview'
 import UploadDraftReview, { type UploadDraft } from './_components/UploadDraftReview'
 
+export const dynamic = 'force-dynamic'
+export const revalidate = 0
+
 export default async function DraftReviewPage({ params }: { params: { id: string } }) {
   const supabase = createAdminClient()
 

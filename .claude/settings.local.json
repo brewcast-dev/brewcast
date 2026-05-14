@@ -30,7 +30,12 @@
       "Bash(git -C \"C:\\\\Users\\\\Lenovo\\\\brewcast\" merge --ff-only claude/peaceful-hoover-2df825)",
       "Bash(git -C \"C:\\\\Users\\\\Lenovo\\\\brewcast\" rev-parse --short HEAD)",
       "Bash(echo \"OK — main is now at $\\(git -C \"C:\\\\Users\\\\Lenovo\\\\brewcast\" rev-parse --short HEAD\\)\")",
-      "Bash(echo \"OK — main at $\\(git -C \"C:\\\\Users\\\\Lenovo\\\\brewcast\" rev-parse --short HEAD\\)\")"
+      "Bash(echo \"OK — main at $\\(git -C \"C:\\\\Users\\\\Lenovo\\\\brewcast\" rev-parse --short HEAD\\)\")",
+      "Bash(git -C \"C:\\\\Users\\\\Lenovo\\\\brewcast\" rev-parse --short origin/main)",
+      "Bash(git -C \"C:\\\\Users\\\\Lenovo\\\\brewcast\" status -sb)",
+      "Bash(git -C \"C:\\\\Users\\\\Lenovo\\\\brewcast\" remote -v)",
+      "Bash(git -C \"C:\\\\Users\\\\Lenovo\\\\brewcast\" log --oneline origin/main..main)",
+      "Bash(git -C \"C:\\\\Users\\\\Lenovo\\\\brewcast\" push origin main)"
     ]
   }
 }
