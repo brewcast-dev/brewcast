@@ -9,9 +9,9 @@ import {
   type LanguageModelMiddleware,
   type UIMessage,
 } from 'ai'
-import type { LanguageModelV3StreamPart } from '@ai-sdk/provider'
 import { google } from '@ai-sdk/google'
 import { groq } from '@ai-sdk/groq'
+import { mistral } from '@ai-sdk/mistral'
 import { z } from 'zod'
 import { createAdminClient } from '@/lib/supabase'
 import type { Brewery } from '@/types/database'
@@ -24,91 +24,81 @@ import crypto from 'crypto'
 
 // ─── Gemini → Groq fallback on 429 / rate-limit ─────────────────────────────
 
-const groqFallback = groq('llama-3.3-70b-versatile')
+const fallbackModels = [
+  groq('llama-3.3-70b-versatile'),
+  mistral('mistral-small-latest'),
+]
 
 // Walk the full cause chain — AISDKError wraps the original HTTP error as .cause
 function is429(error: unknown): boolean {
   if (error == null || typeof error !== 'object') return false
   const e = error as Record<string, unknown>
-  // Direct status code check (APICallError uses .statusCode, not .status)
   if (e.statusCode === 429 || e.status === 429) return true
-  // Message patterns: plain "429", "rate limit", "quota exceeded", "RESOURCE_EXHAUSTED"
   const msg = typeof e.message === 'string' ? e.message : ''
   if (/429|rate.?limit|quota.?exceed|resource.?exhausted/i.test(msg)) return true
-  // Recurse into nested cause
   return e.cause != null && is429(e.cause)
 }
 
-const geminiGroqFallbackMiddleware: LanguageModelMiddleware = {
-  specificationVersion: 'v3',
-
-  // ── streaming (main chat) ───────────────────────────────────────────────────
-  wrapStream: async ({ doStream, params }) => {
-    // Path A: 429 arrives as an HTTP error before the stream opens (most common).
-    // doStream() throws an APICallError with statusCode 429.
-    let geminiResult: Awaited<ReturnType<typeof doStream>>
+// Try each fallback model in order, logging and continuing on 429.
+async function tryFallbacksStream(
+  params: Parameters<(typeof fallbackModels)[0]['doStream']>[0],
+): Promise<Awaited<ReturnType<(typeof fallbackModels)[0]['doStream']>>> {
+  const cleanParams = { ...params, providerMetadata: undefined }
+  for (const model of fallbackModels) {
     try {
-      geminiResult = await doStream()
+      return await model.doStream(cleanParams)
     } catch (err) {
       if (is429(err)) {
-        console.log('[BrewCast] Gemini 429 on connect — switching to Groq llama-3.3-70b-versatile')
-        return groqFallback.doStream(params)
+        console.warn(`[BrewCast] ${model.modelId} rate-limited — trying next fallback`)
+        continue
       }
+      console.error(`[BrewCast] ${model.modelId} doStream error:`, err)
       throw err
     }
+  }
+  throw new Error('[BrewCast] All fallback models rate-limited (Groq + Mistral)')
+}
 
-    // Path B: 429 arrives as a { type: 'error' } chunk inside the SSE stream.
-    // Wrap the Gemini stream; on seeing the error chunk, drain the rest from Groq.
-    const { stream, ...rest } = geminiResult
-    const wrappedStream = new ReadableStream<LanguageModelV3StreamPart>({
-      async start(controller) {
-        const reader = stream.getReader()
-        try {
-          while (true) {
-            const { done, value } = await reader.read()
-            if (done) { controller.close(); break }
+async function tryFallbacksGenerate(
+  params: Parameters<(typeof fallbackModels)[0]['doGenerate']>[0],
+): Promise<Awaited<ReturnType<(typeof fallbackModels)[0]['doGenerate']>>> {
+  const cleanParams = { ...params, providerMetadata: undefined }
+  for (const model of fallbackModels) {
+    try {
+      return await model.doGenerate(cleanParams)
+    } catch (err) {
+      if (is429(err)) {
+        console.warn(`[BrewCast] ${model.modelId} rate-limited — trying next fallback`)
+        continue
+      }
+      console.error(`[BrewCast] ${model.modelId} doGenerate error:`, err)
+      throw err
+    }
+  }
+  throw new Error('[BrewCast] All fallback models rate-limited (Groq + Mistral)')
+}
 
-            if (value.type === 'error' && is429(value.error)) {
-              reader.cancel()
-              console.log('[BrewCast] Gemini 429 in stream — switching to Groq llama-3.3-70b-versatile')
-              const groqResult = await groqFallback.doStream(params)
-              const groqReader = groqResult.stream.getReader()
-              try {
-                while (true) {
-                  const { done: d, value: v } = await groqReader.read()
-                  if (d) break
-                  controller.enqueue(v)
-                }
-                controller.close()
-              } finally {
-                groqReader.releaseLock()
-              }
-              break
-            }
+const geminiWithFallbackMiddleware: LanguageModelMiddleware = {
+  specificationVersion: 'v3',
 
-            controller.enqueue(value)
-          }
-        } catch (err) {
-          controller.error(err)
-        } finally {
-          reader.releaseLock()
-        }
-      },
-    })
-
-    return { ...rest, stream: wrappedStream }
+  // If Gemini 429s on the initial connection, try Groq then Mistral in order.
+  wrapStream: async ({ doStream, params }) => {
+    try {
+      return await doStream()
+    } catch (err) {
+      if (!is429(err)) throw err
+      console.log('[BrewCast] Gemini 429 — trying fallback chain: Groq → Mistral')
+      return tryFallbacksStream(params)
+    }
   },
 
-  // ── non-streaming (generateText / generateObject inside tools) ─────────────
   wrapGenerate: async ({ doGenerate, params }) => {
     try {
       return await doGenerate()
     } catch (err) {
-      if (is429(err)) {
-        console.log('[BrewCast] Gemini 429 on generate — switching to Groq llama-3.3-70b-versatile')
-        return groqFallback.doGenerate(params)
-      }
-      throw err
+      if (!is429(err)) throw err
+      console.log('[BrewCast] Gemini 429 on generate — trying fallback chain: Groq → Mistral')
+      return tryFallbacksGenerate(params)
     }
   },
 }
@@ -142,7 +132,7 @@ export async function POST(req: Request) {
 
   const model = wrapLanguageModel({
     model: google('gemini-2.5-flash'),
-    middleware: geminiGroqFallbackMiddleware,
+    middleware: geminiWithFallbackMiddleware,
   })
 
   const result = streamText({

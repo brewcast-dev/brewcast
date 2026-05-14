@@ -7,17 +7,20 @@ import type { Post, PostStatus } from '@/types/database'
 import { approvePost, queuePost, deletePost } from '../../actions'
 
 const STATUS_STYLES: Record<PostStatus, string> = {
-  draft:     'bg-zinc-700 text-zinc-300',
-  approved:  'bg-blue-900 text-blue-300',
-  queued:    'bg-amber-900 text-amber-300',
+  draft: 'bg-zinc-700 text-zinc-300',
+  approved: 'bg-blue-900 text-blue-300',
+  queued: 'bg-amber-900 text-amber-300',
   published: 'bg-green-900 text-green-300',
-  failed:    'bg-red-900 text-red-300',
+  failed: 'bg-red-900 text-red-300',
 }
 
 function toDatetimeLocal(iso: string | null): string {
   if (!iso) return ''
-  // Slice to 'YYYY-MM-DDTHH:mm' which is what datetime-local expects
-  return iso.slice(0, 16)
+  const date = new Date(iso)
+  // Convert UTC to IST (UTC+5:30) for display
+  const istOffset = 5.5 * 60 * 60 * 1000
+  const istDate = new Date(date.getTime() + istOffset)
+  return istDate.toISOString().slice(0, 16)
 }
 
 export default function PostReview({ post }: { post: Post }) {
@@ -171,9 +174,13 @@ export default function PostReview({ post }: { post: Post }) {
               className="w-full rounded-lg bg-zinc-800 border border-zinc-700 px-3 py-2 text-sm text-zinc-200 focus:outline-none focus:border-amber-500 transition-colors"
             />
             <button
-              onClick={() =>
-                run(() => queuePost(post.id, scheduledAt || new Date().toISOString()))
-              }
+              onClick={() => {
+                // Convert local datetime-local value to UTC ISO string
+                const utcIso = scheduledAt
+                  ? new Date(scheduledAt).toISOString()
+                  : new Date().toISOString()
+                run(() => queuePost(post.id, utcIso))
+              }}
               disabled={isPending}
               className="w-full px-4 py-2.5 rounded-lg bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-zinc-950 text-sm font-medium transition-colors"
             >
