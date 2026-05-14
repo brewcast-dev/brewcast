@@ -126,6 +126,12 @@ export async function POST(req: Request) {
     'You always confirm before publishing anything.',
     'You have access to the following tools — use them to get things done.',
     'After saving a draft, always share the review link: /drafts/[id]',
+    '',
+    'CRITICAL ID RULES — read carefully:',
+    '- `post_id` is ALWAYS the UUID primary key from the local Supabase `posts` table (looks like `f47ac10b-58cc-4372-a567-0e02b2c3d479`).',
+    '- `meta_post_id` is the long numeric Instagram/Facebook ID (looks like `18078147443553005`) — NEVER pass this as a post_id.',
+    '- Before calling publish_post, ALWAYS call list_posts first to get the correct UUIDs. Do not guess or reuse IDs from earlier in the conversation.',
+    '- To publish many posts at once, call list_posts(status="queued") then publish_post for each returned UUID, one by one.',
   ].join('\n')
 
   const modelMessages = await convertToModelMessages(body.messages)
@@ -652,13 +658,94 @@ function buildTools(ctx: {
       },
     }),
 
+    // ── 8b. list_posts ──────────────────────────────────────────────────────
+    list_posts: tool({
+      description:
+        'List posts from the Supabase posts table. Use this BEFORE publish_post to get the correct UUIDs. ' +
+        'Returns the local UUID id (for publish_post), status, platform, caption preview, and scheduled_at. ' +
+        'Filter by status (e.g. "queued", "draft", "approved", "published") or leave empty for all.',
+      inputSchema: z.object({
+        status: z
+          .enum(['draft', 'approved', 'queued', 'published', 'failed'])
+          .optional()
+          .describe('Filter by post status. Omit to list all posts.'),
+        limit: z.number().int().min(1).max(50).default(20).optional(),
+      }),
+      execute: async ({ status, limit }) => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        let query: any = supabase
+          .from('posts')
+          .select('id, status, platform, content_type, caption, scheduled_at, created_at, meta_post_id')
+          .order('created_at', { ascending: false })
+          .limit(limit ?? 20)
+        if (status) query = query.eq('status', status)
+        const { data, error } = await query
+        if (error) return { error: error.message }
+        const rows = (data ?? []) as Array<{
+          id: string
+          status: string
+          platform: string
+          content_type: string
+          caption: string | null
+          scheduled_at: string | null
+          created_at: string
+          meta_post_id: string | null
+        }>
+        return {
+          count: rows.length,
+          posts: rows.map((r) => ({
+            id: r.id, // Local UUID — use this for publish_post
+            status: r.status,
+            platform: r.platform,
+            content_type: r.content_type,
+            caption_preview: r.caption ? r.caption.slice(0, 100) + (r.caption.length > 100 ? '…' : '') : null,
+            scheduled_at: r.scheduled_at,
+            already_published_meta_id: r.meta_post_id, // For reference only — never pass as post_id
+          })),
+        }
+      },
+    }),
+
+    // ── 8c. process_queue_now ───────────────────────────────────────────────
+    process_queue_now: tool({
+      description:
+        'Manually trigger the queue processor to publish any posts that are queued and past their scheduled_at time. ' +
+        'Use this when the user wants to "publish all queued posts now" — it is the safest way to bulk-publish ' +
+        'because it uses the same code path as the automated scheduler. ' +
+        'For local development this is the only way to flush the queue (the GitHub Actions cron only runs in production).',
+      inputSchema: z.object({}),
+      execute: async () => {
+        const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000'
+        const secret = process.env.QUEUE_SECRET
+        if (!secret) return { error: 'QUEUE_SECRET not set in environment — cannot trigger queue processor' }
+        try {
+          const res = await fetch(`${appUrl}/api/queue/process`, {
+            headers: { Authorization: `Bearer ${secret}` },
+          })
+          const json = await res.json().catch(() => ({}))
+          if (!res.ok) return { error: `Queue processor returned ${res.status}`, body: json }
+          return { ok: true, result: json }
+        } catch (err) {
+          return { error: (err as Error).message }
+        }
+      },
+    }),
+
     // ── 9. publish_post ─────────────────────────────────────────────────────
     publish_post: tool({
       description:
         'Publish an approved draft to Instagram and/or Facebook via the Meta Graph API. ' +
+        'IMPORTANT: post_id MUST be the local Supabase UUID (e.g. f47ac10b-58cc-4372-a567-0e02b2c3d479), ' +
+        'NOT the Instagram/Facebook media ID (which is a long number like 18078147443553005). ' +
+        'Always call list_posts first to get the correct UUIDs. ' +
         'Always confirm with the user before calling this tool.',
       inputSchema: z.object({
-        post_id: z.string().uuid().describe('The draft post ID from the Supabase database'),
+        post_id: z
+          .string()
+          .uuid()
+          .describe(
+            'The local Supabase UUID for the post (NOT the Meta/Instagram ID). Get this from list_posts.',
+          ),
       }),
       execute: async ({ post_id }) => {
         const igUserId = process.env.META_IG_USER_ID
