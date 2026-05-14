@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { generateObject } from 'ai'
 import { google } from '@ai-sdk/google'
 import { groq } from '@ai-sdk/groq'
+import { mistral } from '@ai-sdk/mistral'
 import { z } from 'zod'
 
 const AnalysisSchema = z.object({
@@ -70,6 +71,28 @@ async function analyzeWithGroq(imageUrl: string): Promise<PhotoAnalysis> {
   return object
 }
 
+async function analyzeWithMistral(imageUrl: string): Promise<PhotoAnalysis> {
+  // Pixtral — Mistral's multimodal model
+  const { object } = await generateObject({
+    model: mistral('pixtral-12b-2409'),
+    schema: AnalysisSchema,
+    messages: [
+      {
+        role: 'user',
+        content: [
+          { type: 'image', image: new URL(imageUrl) },
+          {
+            type: 'text',
+            text: 'Analyse this brewery photo. Return the mood, subjects, best Instagram filter, visual quality score (0-100), confidence, and a one-sentence description.',
+          },
+        ],
+      },
+    ],
+    system: SYSTEM_PROMPT,
+  })
+  return object
+}
+
 export async function POST(req: Request) {
   let body: { imageUrl: string }
   try {
@@ -83,28 +106,35 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'imageUrl is required' }, { status: 400 })
   }
 
-  let geminiError: unknown = null
+  const errors: Record<string, string> = {}
+
   try {
     const analysis = await analyzeWithGemini(imageUrl)
     return NextResponse.json(analysis)
   } catch (err) {
-    geminiError = err
-    console.warn('[analyze-photo] Gemini failed, trying Groq:', (err as Error).message)
+    errors.gemini = (err as Error).message
+    console.warn('[analyze-photo] Gemini failed, trying Groq:', errors.gemini)
   }
 
   try {
     const analysis = await analyzeWithGroq(imageUrl)
     return NextResponse.json(analysis)
-  } catch (groqErr) {
-    console.error('[analyze-photo] Both providers failed.')
-    console.error('  Gemini:', (geminiError as Error)?.message ?? geminiError)
-    console.error('  Groq:  ', (groqErr as Error).message)
+  } catch (err) {
+    errors.groq = (err as Error).message
+    console.warn('[analyze-photo] Groq failed, trying Mistral:', errors.groq)
+  }
+
+  try {
+    const analysis = await analyzeWithMistral(imageUrl)
+    return NextResponse.json(analysis)
+  } catch (err) {
+    errors.mistral = (err as Error).message
+    console.error('[analyze-photo] All three vision providers failed.')
+    console.error('  Gemini: ', errors.gemini)
+    console.error('  Groq:   ', errors.groq)
+    console.error('  Mistral:', errors.mistral)
     return NextResponse.json(
-      {
-        error: 'AI vision analysis unavailable',
-        gemini: (geminiError as Error)?.message ?? String(geminiError),
-        groq: (groqErr as Error).message,
-      },
+      { error: 'AI vision analysis unavailable — all providers failed', ...errors },
       { status: 503 },
     )
   }

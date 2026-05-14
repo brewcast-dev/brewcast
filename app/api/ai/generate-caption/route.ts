@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { generateObject } from 'ai'
 import { google } from '@ai-sdk/google'
 import { groq } from '@ai-sdk/groq'
+import { mistral } from '@ai-sdk/mistral'
 import { z } from 'zod'
 import type { PhotoAnalysis } from '../analyze-photo/route'
 
@@ -66,6 +67,19 @@ async function captionWithGroq(
   return object
 }
 
+async function captionWithMistral(
+  analysis: PhotoAnalysis,
+  breweryConcepts?: string[],
+): Promise<CaptionResult> {
+  const { object } = await generateObject({
+    model: mistral('mistral-small-latest'),
+    schema: CaptionSchema,
+    system: DISTRICT6_BRAND_CONTEXT,
+    prompt: buildPrompt(analysis, breweryConcepts),
+  })
+  return object
+}
+
 export async function POST(req: Request) {
   let body: { analysis: PhotoAnalysis; breweryConcepts?: string[] }
   try {
@@ -79,17 +93,36 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'analysis is required' }, { status: 400 })
   }
 
+  const errors: Record<string, string> = {}
+
   try {
     const result = await captionWithGemini(analysis, breweryConcepts)
     return NextResponse.json(result)
-  } catch (geminiErr) {
-    console.warn('[generate-caption] Gemini failed, trying Groq:', geminiErr)
-    try {
-      const result = await captionWithGroq(analysis, breweryConcepts)
-      return NextResponse.json(result)
-    } catch (groqErr) {
-      console.error('[generate-caption] Both Gemini and Groq failed:', groqErr)
-      return NextResponse.json({ error: 'Caption generation unavailable' }, { status: 503 })
-    }
+  } catch (err) {
+    errors.gemini = (err as Error).message
+    console.warn('[generate-caption] Gemini failed, trying Groq:', errors.gemini)
+  }
+
+  try {
+    const result = await captionWithGroq(analysis, breweryConcepts)
+    return NextResponse.json(result)
+  } catch (err) {
+    errors.groq = (err as Error).message
+    console.warn('[generate-caption] Groq failed, trying Mistral:', errors.groq)
+  }
+
+  try {
+    const result = await captionWithMistral(analysis, breweryConcepts)
+    return NextResponse.json(result)
+  } catch (err) {
+    errors.mistral = (err as Error).message
+    console.error('[generate-caption] All three caption providers failed.')
+    console.error('  Gemini: ', errors.gemini)
+    console.error('  Groq:   ', errors.groq)
+    console.error('  Mistral:', errors.mistral)
+    return NextResponse.json(
+      { error: 'Caption generation unavailable — all providers failed', ...errors },
+      { status: 503 },
+    )
   }
 }
