@@ -4,7 +4,22 @@ import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import Image from 'next/image'
 import type { Post, PostStatus } from '@/types/database'
-import { approvePost, queuePost, deletePost, publishPostNow } from '../../actions'
+import {
+  approvePost,
+  queuePost,
+  archivePost,
+  restorePost,
+  purgePost,
+  publishPostNow,
+} from '../../actions'
+
+const ARCHIVE_RETENTION_DAYS = 30
+
+function daysUntilPurge(archivedAt: string): number {
+  const archived = new Date(archivedAt).getTime()
+  const purgeAt = archived + ARCHIVE_RETENTION_DAYS * 24 * 60 * 60 * 1000
+  return Math.max(0, Math.ceil((purgeAt - Date.now()) / (24 * 60 * 60 * 1000)))
+}
 
 const STATUS_STYLES: Record<PostStatus, string> = {
   draft: 'bg-zinc-700 text-zinc-300',
@@ -43,11 +58,13 @@ export default function PostReview({ post }: { post: Post }) {
   }
 
   const [confirmPublish, setConfirmPublish] = useState(false)
+  const [confirmPurge, setConfirmPurge] = useState(false)
   const mediaUrls = post.media_urls ?? []
   const statusStyle = STATUS_STYLES[post.status] ?? 'bg-zinc-700 text-zinc-300'
-  const canEdit = post.status !== 'published'
-  const canDelete = post.status !== 'published' && post.status !== 'queued'
-  const canPublishNow = post.status !== 'published'
+  const isArchived = !!post.archived_at
+  const canEdit = post.status !== 'published' && !isArchived
+  const canArchive = !isArchived && post.status !== 'queued'
+  const canPublishNow = post.status !== 'published' && !isArchived
 
   return (
     <div className="flex flex-col lg:flex-row gap-8">
@@ -242,35 +259,79 @@ export default function PostReview({ post }: { post: Post }) {
           </div>
         )}
 
-        {/* Delete */}
-        {canDelete && (
-          confirmDelete ? (
-            <div className="space-y-2">
-              <p className="text-xs text-red-400 text-center">This cannot be undone.</p>
+        {/* Archive / Restore / Permanent delete */}
+        {isArchived ? (
+          <div className="space-y-2 rounded-xl border border-amber-800 bg-amber-950/40 p-3">
+            <p className="text-xs text-amber-300 text-center">
+              In archive · auto-deletes in{' '}
+              {daysUntilPurge(post.archived_at!)} day
+              {daysUntilPurge(post.archived_at!) !== 1 ? 's' : ''}
+            </p>
+            <button
+              onClick={() => run(() => restorePost(post.id))}
+              disabled={isPending}
+              className="w-full px-3 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-sm font-medium transition-colors"
+            >
+              {isPending ? 'Restoring…' : 'Restore'}
+            </button>
+            {confirmPurge ? (
               <div className="flex gap-2">
                 <button
-                  onClick={() => setConfirmDelete(false)}
-                  className="flex-1 px-3 py-2 rounded-lg border border-zinc-700 text-zinc-400 text-sm hover:bg-zinc-800 transition-colors"
+                  onClick={() => setConfirmPurge(false)}
+                  className="flex-1 px-3 py-2 rounded-lg border border-zinc-700 text-zinc-400 text-xs hover:bg-zinc-800 transition-colors"
                 >
                   Cancel
                 </button>
                 <button
-                  onClick={() => run(() => deletePost(post.id), () => router.push('/drafts'))}
+                  onClick={() => run(() => purgePost(post.id), () => router.push('/drafts'))}
                   disabled={isPending}
-                  className="flex-1 px-3 py-2 rounded-lg bg-red-900 hover:bg-red-800 disabled:opacity-50 text-red-200 text-sm font-medium transition-colors"
+                  className="flex-1 px-3 py-2 rounded-lg bg-red-900 hover:bg-red-800 disabled:opacity-50 text-red-200 text-xs font-medium transition-colors"
                 >
-                  {isPending ? 'Deleting…' : 'Delete'}
+                  {isPending ? 'Deleting…' : 'Delete forever'}
                 </button>
               </div>
-            </div>
-          ) : (
-            <button
-              onClick={() => setConfirmDelete(true)}
-              disabled={isPending}
-              className="w-full px-4 py-2.5 rounded-lg border border-zinc-700 hover:border-red-800 hover:text-red-400 disabled:opacity-50 text-zinc-500 text-sm transition-colors"
-            >
-              Delete draft
-            </button>
+            ) : (
+              <button
+                onClick={() => setConfirmPurge(true)}
+                disabled={isPending}
+                className="w-full px-3 py-2 rounded-lg border border-zinc-700 hover:border-red-800 hover:text-red-400 disabled:opacity-50 text-zinc-500 text-xs transition-colors"
+              >
+                Delete permanently
+              </button>
+            )}
+          </div>
+        ) : (
+          canArchive && (
+            confirmDelete ? (
+              <div className="space-y-2">
+                <p className="text-xs text-amber-400 text-center">
+                  Archive moves this to /drafts?status=archived. You have 30 days to restore.
+                </p>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => setConfirmDelete(false)}
+                    className="flex-1 px-3 py-2 rounded-lg border border-zinc-700 text-zinc-400 text-sm hover:bg-zinc-800 transition-colors"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={() => run(() => archivePost(post.id), () => router.push('/drafts'))}
+                    disabled={isPending}
+                    className="flex-1 px-3 py-2 rounded-lg bg-amber-700 hover:bg-amber-600 disabled:opacity-50 text-amber-50 text-sm font-medium transition-colors"
+                  >
+                    {isPending ? 'Archiving…' : 'Archive'}
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <button
+                onClick={() => setConfirmDelete(true)}
+                disabled={isPending}
+                className="w-full px-4 py-2.5 rounded-lg border border-zinc-700 hover:border-amber-700 hover:text-amber-400 disabled:opacity-50 text-zinc-500 text-sm transition-colors"
+              >
+                Archive draft
+              </button>
+            )
           )
         )}
       </div>

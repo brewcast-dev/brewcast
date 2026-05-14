@@ -14,7 +14,7 @@ export async function GET(req: NextRequest) {
   }
 
   const supabase = createAdminClient()
-  const results = { processed: 0, failed: 0 }
+  const results = { processed: 0, failed: 0, purged: 0 }
 
   // ── 1. pg-boss path ───────────────────────────────────────────────────────
   // Fetch all jobs that have reached their startAfter time (up to 100 at once).
@@ -57,10 +57,26 @@ export async function GET(req: NextRequest) {
     }
   }
 
+  // ── 3. Auto-purge archived rows older than 30 days ────────────────────────
+  const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString()
+  for (const table of ['posts', 'drafts'] as const) {
+    const { data: purged, error: purgeErr } = await supabase
+      .from(table)
+      .delete()
+      .lt('archived_at', thirtyDaysAgo)
+      .select('id')
+    if (purgeErr) {
+      console.error(`[queue] purge ${table} failed:`, purgeErr.message)
+    } else {
+      results.purged += purged?.length ?? 0
+    }
+  }
+
   return NextResponse.json({
     ok: true,
     timestamp: new Date().toISOString(),
     processed: results.processed,
     failed: results.failed,
+    purged: results.purged,
   })
 }

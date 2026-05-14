@@ -12,7 +12,17 @@ export interface DraftItem {
   thumbnail: string | null
   hasVideo: boolean
   scheduledAt: string | null
+  archivedAt: string | null
   createdAt: string
+}
+
+const ARCHIVE_RETENTION_DAYS = 30
+
+function daysUntilPurge(archivedAt: string): number {
+  const archived = new Date(archivedAt).getTime()
+  const purgeAt = archived + ARCHIVE_RETENTION_DAYS * 24 * 60 * 60 * 1000
+  const remaining = Math.ceil((purgeAt - Date.now()) / (24 * 60 * 60 * 1000))
+  return Math.max(0, remaining)
 }
 
 const STATUS_STYLES: Record<string, string> = {
@@ -76,9 +86,16 @@ export default function DraftCard({ item }: { item: DraftItem }) {
         </p>
 
         <div className="text-xs text-zinc-600 pt-2 border-t border-zinc-800">
-          {item.scheduledAt
-            ? `Scheduled: ${new Date(item.scheduledAt).toLocaleDateString()}`
-            : `Created: ${new Date(item.createdAt).toLocaleDateString()}`}
+          {item.archivedAt ? (
+            <span className="text-amber-500">
+              Archived · {daysUntilPurge(item.archivedAt)} day
+              {daysUntilPurge(item.archivedAt) !== 1 ? 's' : ''} until auto-delete
+            </span>
+          ) : item.scheduledAt ? (
+            `Scheduled: ${new Date(item.scheduledAt).toLocaleDateString()}`
+          ) : (
+            `Created: ${new Date(item.createdAt).toLocaleDateString()}`
+          )}
         </div>
       </div>
     </Link>

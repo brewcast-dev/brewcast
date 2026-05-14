@@ -43,6 +43,7 @@ export interface Post {
   published_at: string | null
   meta_post_id: string | null
   ad_targeting: AdTargeting | null
+  archived_at: string | null
   created_at: string
 }
 

@@ -32,12 +32,36 @@ export async function queuePost(id: string, scheduledAt: string) {
   revalidatePath(`/drafts/${id}`)
 }
 
-export async function deletePost(id: string) {
+/**
+ * Soft-delete: sets archived_at = now(). The row is hidden from normal views
+ * and will be hard-deleted by the queue cron after 30 days. Use restorePost()
+ * to undo within that window or purgePost() to delete immediately.
+ */
+export async function archivePost(id: string) {
+  const supabase = createAdminClient()
+  const { error } = await supabase
+    .from('posts')
+    .update({ archived_at: new Date().toISOString() })
+    .eq('id', id)
+  if (error) throw new Error(error.message)
+  revalidatePath('/drafts')
+  revalidatePath(`/drafts/${id}`)
+}
+
+export async function restorePost(id: string) {
+  const supabase = createAdminClient()
+  const { error } = await supabase.from('posts').update({ archived_at: null }).eq('id', id)
+  if (error) throw new Error(error.message)
+  revalidatePath('/drafts')
+  revalidatePath(`/drafts/${id}`)
+}
+
+/** Hard-delete — bypasses the archive. Only callable from the archive tab. */
+export async function purgePost(id: string) {
   const supabase = createAdminClient()
   const { error } = await supabase.from('posts').delete().eq('id', id)
   if (error) throw new Error(error.message)
   revalidatePath('/drafts')
-  // Navigation is handled client-side to avoid redirect-in-server-action edge cases
 }
 
 export async function publishPostNow(id: string) {
@@ -128,7 +152,27 @@ export async function queueUploadDraft(id: string, scheduledAt: string) {
   revalidatePath(`/drafts/${newPostId}`)
 }
 
-export async function deleteUploadDraft(id: string) {
+export async function archiveUploadDraft(id: string) {
+  const supabase = createAdminClient()
+  const { error } = await supabase
+    .from('drafts')
+    .update({ archived_at: new Date().toISOString() })
+    .eq('id', id)
+  if (error) throw new Error(error.message)
+  revalidatePath('/drafts')
+  revalidatePath(`/drafts/${id}`)
+}
+
+export async function restoreUploadDraft(id: string) {
+  const supabase = createAdminClient()
+  const { error } = await supabase.from('drafts').update({ archived_at: null }).eq('id', id)
+  if (error) throw new Error(error.message)
+  revalidatePath('/drafts')
+  revalidatePath(`/drafts/${id}`)
+}
+
+/** Hard-delete — bypasses the archive. */
+export async function purgeUploadDraft(id: string) {
   const supabase = createAdminClient()
   const { error } = await supabase.from('drafts').delete().eq('id', id)
   if (error) throw new Error(error.message)

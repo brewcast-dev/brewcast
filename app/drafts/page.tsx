@@ -10,6 +10,7 @@ const STATUS_TABS = [
   { label: 'Queued',    value: 'queued'    },
   { label: 'Published', value: 'published' },
   { label: 'Failed',    value: 'failed'    },
+  { label: 'Archive',   value: 'archived'  },
 ]
 
 interface UploadDraftRow {
@@ -23,6 +24,7 @@ interface UploadDraftRow {
   platforms: string[]
   status: string
   scheduled_at: string | null
+  archived_at: string | null
   created_at: string
 }
 
@@ -45,6 +47,7 @@ export default async function DraftsPage({
 }) {
   const supabase = createAdminClient()
   const activeStatus = searchParams.status ?? 'all'
+  const isArchiveView = activeStatus === 'archived'
 
   // ── Fetch from both tables in parallel ─────────────────────────────────────
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -52,9 +55,18 @@ export default async function DraftsPage({
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let draftsQuery: any = supabase.from('drafts').select('*').order('created_at', { ascending: false })
 
-  if (activeStatus !== 'all') {
-    postsQuery  = postsQuery.eq('status', activeStatus)
-    draftsQuery = draftsQuery.eq('status', activeStatus)
+  if (isArchiveView) {
+    // Only archived rows
+    postsQuery  = postsQuery.not('archived_at', 'is', null)
+    draftsQuery = draftsQuery.not('archived_at', 'is', null)
+  } else {
+    // Hide archived rows from all other views
+    postsQuery  = postsQuery.is('archived_at', null)
+    draftsQuery = draftsQuery.is('archived_at', null)
+    if (activeStatus !== 'all') {
+      postsQuery  = postsQuery.eq('status', activeStatus)
+      draftsQuery = draftsQuery.eq('status', activeStatus)
+    }
   }
 
   const [postsRes, draftsRes] = await Promise.all([postsQuery, draftsQuery])
@@ -73,6 +85,7 @@ export default async function DraftsPage({
     thumbnail:    p.thumbnail_url ?? p.media_urls?.[0] ?? null,
     hasVideo:     !!p.video_url,
     scheduledAt:  p.scheduled_at,
+    archivedAt:   p.archived_at,
     createdAt:    p.created_at,
   }))
 
@@ -86,6 +99,7 @@ export default async function DraftsPage({
     thumbnail:    d.edited_image_url ?? d.image_url,
     hasVideo:     false,
     scheduledAt:  d.scheduled_at,
+    archivedAt:   d.archived_at,
     createdAt:    d.created_at,
   }))
 

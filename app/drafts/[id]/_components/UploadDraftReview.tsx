@@ -6,9 +6,19 @@ import Image from 'next/image'
 import {
   approveUploadDraft,
   queueUploadDraft,
-  deleteUploadDraft,
+  archiveUploadDraft,
+  restoreUploadDraft,
+  purgeUploadDraft,
   publishUploadDraftNow,
 } from '../../actions'
+
+const ARCHIVE_RETENTION_DAYS = 30
+
+function daysUntilPurge(archivedAt: string): number {
+  const archived = new Date(archivedAt).getTime()
+  const purgeAt = archived + ARCHIVE_RETENTION_DAYS * 24 * 60 * 60 * 1000
+  return Math.max(0, Math.ceil((purgeAt - Date.now()) / (24 * 60 * 60 * 1000)))
+}
 
 export interface UploadDraft {
   id: string
@@ -21,6 +31,7 @@ export interface UploadDraft {
   platforms: string[]
   status: string
   scheduled_at: string | null
+  archived_at: string | null
   created_at: string
 }
 
@@ -46,6 +57,7 @@ export default function UploadDraftReview({ draft }: { draft: UploadDraft }) {
   const [error, setError] = useState<string | null>(null)
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [confirmPublish, setConfirmPublish] = useState(false)
+  const [confirmPurge, setConfirmPurge] = useState(false)
   const [isPending, startTransition] = useTransition()
 
   function run(action: () => Promise<void>, onSuccess?: () => void) {
@@ -62,9 +74,10 @@ export default function UploadDraftReview({ draft }: { draft: UploadDraft }) {
 
   const statusStyle = STATUS_STYLES[draft.status] ?? 'bg-zinc-700 text-zinc-300'
   const displayImage = draft.edited_image_url ?? draft.image_url
-  const canEdit = draft.status !== 'published' && draft.status !== 'queued'
-  const canDelete = draft.status !== 'published' && draft.status !== 'queued'
-  const canPublishNow = draft.status !== 'published'
+  const isArchived = !!draft.archived_at
+  const canEdit = draft.status !== 'published' && draft.status !== 'queued' && !isArchived
+  const canArchive = !isArchived && draft.status !== 'queued'
+  const canPublishNow = draft.status !== 'published' && !isArchived
 
   return (
     <div className="flex flex-col lg:flex-row gap-8">
@@ -240,35 +253,79 @@ export default function UploadDraftReview({ draft }: { draft: UploadDraft }) {
           </div>
         )}
 
-        {/* Delete */}
-        {canDelete && (
-          confirmDelete ? (
-            <div className="space-y-2">
-              <p className="text-xs text-red-400 text-center">This cannot be undone.</p>
+        {/* Archive / Restore / Permanent delete */}
+        {isArchived ? (
+          <div className="space-y-2 rounded-xl border border-amber-800 bg-amber-950/40 p-3">
+            <p className="text-xs text-amber-300 text-center">
+              In archive · auto-deletes in{' '}
+              {daysUntilPurge(draft.archived_at!)} day
+              {daysUntilPurge(draft.archived_at!) !== 1 ? 's' : ''}
+            </p>
+            <button
+              onClick={() => run(() => restoreUploadDraft(draft.id))}
+              disabled={isPending}
+              className="w-full px-3 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-sm font-medium transition-colors"
+            >
+              {isPending ? 'Restoring…' : 'Restore'}
+            </button>
+            {confirmPurge ? (
               <div className="flex gap-2">
                 <button
-                  onClick={() => setConfirmDelete(false)}
-                  className="flex-1 px-3 py-2 rounded-lg border border-zinc-700 text-zinc-400 text-sm hover:bg-zinc-800 transition-colors"
+                  onClick={() => setConfirmPurge(false)}
+                  className="flex-1 px-3 py-2 rounded-lg border border-zinc-700 text-zinc-400 text-xs hover:bg-zinc-800 transition-colors"
                 >
                   Cancel
                 </button>
                 <button
-                  onClick={() => run(() => deleteUploadDraft(draft.id), () => router.push('/drafts'))}
+                  onClick={() => run(() => purgeUploadDraft(draft.id), () => router.push('/drafts'))}
                   disabled={isPending}
-                  className="flex-1 px-3 py-2 rounded-lg bg-red-900 hover:bg-red-800 disabled:opacity-50 text-red-200 text-sm font-medium transition-colors"
+                  className="flex-1 px-3 py-2 rounded-lg bg-red-900 hover:bg-red-800 disabled:opacity-50 text-red-200 text-xs font-medium transition-colors"
                 >
-                  {isPending ? 'Deleting…' : 'Delete'}
+                  {isPending ? 'Deleting…' : 'Delete forever'}
                 </button>
               </div>
-            </div>
-          ) : (
-            <button
-              onClick={() => setConfirmDelete(true)}
-              disabled={isPending}
-              className="w-full px-4 py-2.5 rounded-lg border border-zinc-700 hover:border-red-800 hover:text-red-400 disabled:opacity-50 text-zinc-500 text-sm transition-colors"
-            >
-              Delete draft
-            </button>
+            ) : (
+              <button
+                onClick={() => setConfirmPurge(true)}
+                disabled={isPending}
+                className="w-full px-3 py-2 rounded-lg border border-zinc-700 hover:border-red-800 hover:text-red-400 disabled:opacity-50 text-zinc-500 text-xs transition-colors"
+              >
+                Delete permanently
+              </button>
+            )}
+          </div>
+        ) : (
+          canArchive && (
+            confirmDelete ? (
+              <div className="space-y-2">
+                <p className="text-xs text-amber-400 text-center">
+                  Archive moves this to /drafts?status=archived. You have 30 days to restore.
+                </p>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => setConfirmDelete(false)}
+                    className="flex-1 px-3 py-2 rounded-lg border border-zinc-700 text-zinc-400 text-sm hover:bg-zinc-800 transition-colors"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={() => run(() => archiveUploadDraft(draft.id), () => router.push('/drafts'))}
+                    disabled={isPending}
+                    className="flex-1 px-3 py-2 rounded-lg bg-amber-700 hover:bg-amber-600 disabled:opacity-50 text-amber-50 text-sm font-medium transition-colors"
+                  >
+                    {isPending ? 'Archiving…' : 'Archive'}
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <button
+                onClick={() => setConfirmDelete(true)}
+                disabled={isPending}
+                className="w-full px-4 py-2.5 rounded-lg border border-zinc-700 hover:border-amber-700 hover:text-amber-400 disabled:opacity-50 text-zinc-500 text-sm transition-colors"
+              >
+                Archive draft
+              </button>
+            )
           )
         )}
       </div>
