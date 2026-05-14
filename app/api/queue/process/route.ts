@@ -6,10 +6,11 @@ import type { Post } from '@/types/database'
 // Allow up to 60 s — reels need polling for Meta transcoding
 export const maxDuration = 60
 
-const GRAPH_BASE = 'https://graph.facebook.com/v19.0'
+const GRAPH_BASE = 'https://graph.instagram.com/v21.0'
 
 export async function GET(req: NextRequest) {
   // ── Auth ──────────────────────────────────────────────────────────────────
+  console.log('[debug] token starts with:', process.env.META_ACCESS_TOKEN?.slice(0, 20))
   const auth = req.headers.get('authorization')
   if (!auth || auth !== `Bearer ${process.env.QUEUE_SECRET}`) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
@@ -152,6 +153,7 @@ async function publishPost(supabase: SupabaseClient, postId: string): Promise<vo
             image_url: imageUrl,
             caption: p.caption ?? '',
           })
+          await new Promise(r => setTimeout(r, 3000))
           const pub = await graphPost(`/${igUserId}/media_publish`, {
             creation_id: container.id as string,
           })

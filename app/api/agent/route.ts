@@ -673,7 +673,7 @@ function buildTools(ctx: {
 
         if (error || !post) return { error: error?.message ?? 'Post not found' }
 
-        const GRAPH_BASE = 'https://graph.facebook.com/v19.0'
+        const GRAPH_BASE = 'https://graph.instagram.com/v21.0'
 
         async function graphPost(
           endpoint: string,
