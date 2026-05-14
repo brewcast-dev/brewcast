@@ -10,7 +10,6 @@ const GRAPH_BASE = 'https://graph.instagram.com/v21.0'
 
 export async function GET(req: NextRequest) {
   // ── Auth ──────────────────────────────────────────────────────────────────
-  console.log('[debug] token starts with:', process.env.META_ACCESS_TOKEN?.slice(0, 20))
   const auth = req.headers.get('authorization')
   if (!auth || auth !== `Bearer ${process.env.QUEUE_SECRET}`) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
