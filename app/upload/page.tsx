@@ -241,20 +241,42 @@ async function scoreAndSelect(
   photos: BreweryPhoto[],
   count: number,
 ): Promise<{ photo: BreweryPhoto; analysis: PhotoAnalysis }[]> {
-  // Analyse all photos in parallel (max 10 at once)
-  const batch = photos.slice(0, 20)
-  const results = await Promise.allSettled(
-    batch.map(async (photo) => {
-      const res = await fetch('/api/ai/analyze-photo', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ imageUrl: photo.url }),
-      })
-      if (!res.ok) throw new Error(`analyze-photo ${res.status}`)
-      const analysis: PhotoAnalysis = await res.json()
-      return { photo, analysis }
-    }),
-  )
+  // Cap candidates and limit concurrency — Gemini free tier is ~15 RPM,
+  // hammering with 20 parallel calls trips rate-limits and fails the whole batch.
+  const CONCURRENCY = 3
+  // Score at most the number of posts wanted + a small pool for variety
+  const candidates = photos.slice(0, Math.min(photos.length, Math.max(count + 4, 8)))
+
+  const results: PromiseSettledResult<{ photo: BreweryPhoto; analysis: PhotoAnalysis }>[] = []
+  for (let i = 0; i < candidates.length; i += CONCURRENCY) {
+    const chunk = candidates.slice(i, i + CONCURRENCY)
+    const chunkResults = await Promise.allSettled(
+      chunk.map(async (photo) => {
+        const res = await fetch('/api/ai/analyze-photo', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ imageUrl: photo.url }),
+        })
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({}))
+          throw new Error(
+            `analyze-photo ${res.status}: ${(body as { error?: string }).error ?? 'unknown'}`,
+          )
+        }
+        const analysis: PhotoAnalysis = await res.json()
+        return { photo, analysis }
+      }),
+    )
+    results.push(...chunkResults)
+  }
+
+  const failures = results.filter((r) => r.status === 'rejected')
+  if (failures.length > 0) {
+    console.warn(
+      `[scoreAndSelect] ${failures.length}/${results.length} analyses failed.`,
+      (failures[0] as PromiseRejectedResult).reason,
+    )
+  }
 
   const scored = results
     .filter((r): r is PromiseFulfilledResult<{ photo: BreweryPhoto; analysis: PhotoAnalysis }> =>
@@ -262,6 +284,10 @@ async function scoreAndSelect(
     )
     .map((r) => r.value)
     .sort((a, b) => b.analysis.score - a.analysis.score)
+
+  if (scored.length === 0) {
+    throw new Error('All photo analyses failed — check the server console for the underlying Gemini/Groq error.')
+  }
 
   // Ensure variety by avoiding duplicate filters when possible
   const selected: typeof scored = []
@@ -415,6 +441,7 @@ export default function UploadPage() {
       setPhase('review')
     } catch (err) {
       console.error('[UploadPage] Generation failed:', err)
+      setToast(`Generation failed: ${(err as Error).message}`)
       setPhase('setup')
     }
   }, [photos, postCount, renderAndUploadFiltered])

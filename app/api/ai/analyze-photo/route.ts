@@ -49,8 +49,9 @@ async function analyzeWithGemini(imageUrl: string): Promise<PhotoAnalysis> {
 }
 
 async function analyzeWithGroq(imageUrl: string): Promise<PhotoAnalysis> {
+  // Llama 4 Scout — current Groq vision model (Llama 3.2 vision was decommissioned mid-2025)
   const { object } = await generateObject({
-    model: groq('llama-3.2-90b-vision-preview'),
+    model: groq('meta-llama/llama-4-scout-17b-16e-instruct'),
     schema: AnalysisSchema,
     messages: [
       {
@@ -82,17 +83,29 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'imageUrl is required' }, { status: 400 })
   }
 
+  let geminiError: unknown = null
   try {
     const analysis = await analyzeWithGemini(imageUrl)
     return NextResponse.json(analysis)
-  } catch (geminiErr) {
-    console.warn('[analyze-photo] Gemini failed, trying Groq:', geminiErr)
-    try {
-      const analysis = await analyzeWithGroq(imageUrl)
-      return NextResponse.json(analysis)
-    } catch (groqErr) {
-      console.error('[analyze-photo] Both Gemini and Groq failed:', groqErr)
-      return NextResponse.json({ error: 'AI vision analysis unavailable' }, { status: 503 })
-    }
+  } catch (err) {
+    geminiError = err
+    console.warn('[analyze-photo] Gemini failed, trying Groq:', (err as Error).message)
+  }
+
+  try {
+    const analysis = await analyzeWithGroq(imageUrl)
+    return NextResponse.json(analysis)
+  } catch (groqErr) {
+    console.error('[analyze-photo] Both providers failed.')
+    console.error('  Gemini:', (geminiError as Error)?.message ?? geminiError)
+    console.error('  Groq:  ', (groqErr as Error).message)
+    return NextResponse.json(
+      {
+        error: 'AI vision analysis unavailable',
+        gemini: (geminiError as Error)?.message ?? String(geminiError),
+        groq: (groqErr as Error).message,
+      },
+      { status: 503 },
+    )
   }
 }
