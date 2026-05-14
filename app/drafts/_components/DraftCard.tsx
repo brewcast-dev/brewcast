@@ -24,8 +24,7 @@ const STATUS_STYLES: Record<string, string> = {
 }
 
 export default function DraftCard({ item }: { item: DraftItem }) {
-  // Drafts created via /upload don't have a detail page yet — link to the table
-  const href = item.source === 'drafts' ? `/drafts?focus=${item.id}` : `/drafts/${item.id}`
+  const href = `/drafts/${item.id}`
 
   return (
     <Link
