@@ -78,6 +78,7 @@ async function graphPost(
   const body = new URLSearchParams({ ...params, access_token: process.env.META_ACCESS_TOKEN! })
   const res = await fetch(`${GRAPH_BASE}${endpoint}`, { method: 'POST', body })
   const json = await res.json()
+  console.error(`[Meta API] ${endpoint}`, res.status, JSON.stringify(json))
   if (!res.ok) throw new Error(`Meta API: ${JSON.stringify(json)}`)
   return json as Record<string, unknown>
 }
