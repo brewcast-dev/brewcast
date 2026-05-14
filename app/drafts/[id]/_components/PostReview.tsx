@@ -4,7 +4,7 @@ import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import Image from 'next/image'
 import type { Post, PostStatus } from '@/types/database'
-import { approvePost, queuePost, deletePost } from '../../actions'
+import { approvePost, queuePost, deletePost, publishPostNow } from '../../actions'
 
 const STATUS_STYLES: Record<PostStatus, string> = {
   draft: 'bg-zinc-700 text-zinc-300',
@@ -42,10 +42,12 @@ export default function PostReview({ post }: { post: Post }) {
     })
   }
 
+  const [confirmPublish, setConfirmPublish] = useState(false)
   const mediaUrls = post.media_urls ?? []
   const statusStyle = STATUS_STYLES[post.status] ?? 'bg-zinc-700 text-zinc-300'
   const canEdit = post.status !== 'published'
   const canDelete = post.status !== 'published' && post.status !== 'queued'
+  const canPublishNow = post.status !== 'published'
 
   return (
     <div className="flex flex-col lg:flex-row gap-8">
@@ -195,6 +197,41 @@ export default function PostReview({ post }: { post: Post }) {
             Queued
             {post.scheduled_at && ` · ${new Date(post.scheduled_at).toLocaleString()}`}
           </div>
+        )}
+
+        {/* Publish Now — bypasses the scheduler and publishes immediately */}
+        {canPublishNow && (
+          confirmPublish ? (
+            <div className="space-y-2 rounded-xl border border-green-800 bg-green-950/40 p-3">
+              <p className="text-xs text-green-300 text-center">
+                Publish this to Instagram/Facebook right now?
+              </p>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setConfirmPublish(false)}
+                  disabled={isPending}
+                  className="flex-1 px-3 py-2 rounded-lg border border-zinc-700 text-zinc-400 text-sm hover:bg-zinc-800 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={() => run(() => publishPostNow(post.id))}
+                  disabled={isPending}
+                  className="flex-1 px-3 py-2 rounded-lg bg-green-600 hover:bg-green-500 disabled:opacity-50 text-white text-sm font-medium transition-colors"
+                >
+                  {isPending ? 'Publishing…' : 'Publish'}
+                </button>
+              </div>
+            </div>
+          ) : (
+            <button
+              onClick={() => setConfirmPublish(true)}
+              disabled={isPending}
+              className="w-full px-4 py-2.5 rounded-lg bg-green-600 hover:bg-green-500 disabled:opacity-50 text-white text-sm font-medium transition-colors"
+            >
+              Publish now
+            </button>
+          )
         )}
 
         {/* Published status */}

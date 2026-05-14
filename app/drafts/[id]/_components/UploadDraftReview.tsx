@@ -3,7 +3,12 @@
 import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import Image from 'next/image'
-import { approveUploadDraft, queueUploadDraft, deleteUploadDraft } from '../../actions'
+import {
+  approveUploadDraft,
+  queueUploadDraft,
+  deleteUploadDraft,
+  publishUploadDraftNow,
+} from '../../actions'
 
 export interface UploadDraft {
   id: string
@@ -40,6 +45,7 @@ export default function UploadDraftReview({ draft }: { draft: UploadDraft }) {
   const [scheduledAt, setScheduledAt] = useState(() => toDatetimeLocal(draft.scheduled_at))
   const [error, setError] = useState<string | null>(null)
   const [confirmDelete, setConfirmDelete] = useState(false)
+  const [confirmPublish, setConfirmPublish] = useState(false)
   const [isPending, startTransition] = useTransition()
 
   function run(action: () => Promise<void>, onSuccess?: () => void) {
@@ -58,6 +64,7 @@ export default function UploadDraftReview({ draft }: { draft: UploadDraft }) {
   const displayImage = draft.edited_image_url ?? draft.image_url
   const canEdit = draft.status !== 'published' && draft.status !== 'queued'
   const canDelete = draft.status !== 'published' && draft.status !== 'queued'
+  const canPublishNow = draft.status !== 'published'
 
   return (
     <div className="flex flex-col lg:flex-row gap-8">
@@ -182,6 +189,48 @@ export default function UploadDraftReview({ draft }: { draft: UploadDraft }) {
             Queued
             {draft.scheduled_at && ` · ${new Date(draft.scheduled_at).toLocaleString()}`}
           </div>
+        )}
+
+        {/* Publish Now — bypasses scheduler */}
+        {canPublishNow && (
+          confirmPublish ? (
+            <div className="space-y-2 rounded-xl border border-green-800 bg-green-950/40 p-3">
+              <p className="text-xs text-green-300 text-center">
+                Publish this to Instagram/Facebook right now?
+              </p>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setConfirmPublish(false)}
+                  disabled={isPending}
+                  className="flex-1 px-3 py-2 rounded-lg border border-zinc-700 text-zinc-400 text-sm hover:bg-zinc-800 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={() =>
+                    run(
+                      async () => {
+                        const { postId } = await publishUploadDraftNow(draft.id)
+                        router.push(`/drafts/${postId}`)
+                      },
+                    )
+                  }
+                  disabled={isPending}
+                  className="flex-1 px-3 py-2 rounded-lg bg-green-600 hover:bg-green-500 disabled:opacity-50 text-white text-sm font-medium transition-colors"
+                >
+                  {isPending ? 'Publishing…' : 'Publish'}
+                </button>
+              </div>
+            </div>
+          ) : (
+            <button
+              onClick={() => setConfirmPublish(true)}
+              disabled={isPending}
+              className="w-full px-4 py-2.5 rounded-lg bg-green-600 hover:bg-green-500 disabled:opacity-50 text-white text-sm font-medium transition-colors"
+            >
+              Publish now
+            </button>
+          )
         )}
 
         {/* Published status */}

@@ -3,6 +3,7 @@
 import { createAdminClient } from '@/lib/supabase'
 import { revalidatePath } from 'next/cache'
 import { enqueuePublish } from '@/lib/queue'
+import { publishPost as publishPostToMeta } from '@/lib/publish'
 
 export async function approvePost(id: string) {
   const supabase = createAdminClient()
@@ -37,6 +38,13 @@ export async function deletePost(id: string) {
   if (error) throw new Error(error.message)
   revalidatePath('/drafts')
   // Navigation is handled client-side to avoid redirect-in-server-action edge cases
+}
+
+export async function publishPostNow(id: string) {
+  const supabase = createAdminClient()
+  await publishPostToMeta(supabase, id, { allowAnyStatus: true })
+  revalidatePath('/drafts')
+  revalidatePath(`/drafts/${id}`)
 }
 
 // ── Actions for /upload-sourced drafts (separate `drafts` table) ─────────────
@@ -125,4 +133,56 @@ export async function deleteUploadDraft(id: string) {
   const { error } = await supabase.from('drafts').delete().eq('id', id)
   if (error) throw new Error(error.message)
   revalidatePath('/drafts')
+}
+
+/**
+ * Promote an /upload draft to the posts table and publish to Meta immediately.
+ * Returns the new post UUID so the UI can redirect there.
+ */
+export async function publishUploadDraftNow(id: string): Promise<{ postId: string }> {
+  const supabase = createAdminClient()
+
+  // 1. Fetch the draft
+  const { data: draftData, error: fetchErr } = await supabase
+    .from('drafts')
+    .select('*')
+    .eq('id', id)
+    .single()
+  if (fetchErr || !draftData) throw new Error(fetchErr?.message ?? 'Draft not found')
+  const draft = draftData as UploadDraftRow
+
+  const mediaUrl = draft.edited_image_url ?? draft.image_url
+
+  // 2. Insert into posts (status='queued' so publishPost will pick it up)
+  const { data: postData, error: insertErr } = await supabase
+    .from('posts')
+    .insert({
+      status: 'queued',
+      platform: platformsToColumn(draft.platforms ?? ['instagram']),
+      content_type: 'post',
+      caption: captionWithHashtags(draft.caption, draft.hashtags ?? []),
+      media_urls: [mediaUrl],
+      thumbnail_url: mediaUrl,
+      scheduled_at: new Date().toISOString(),
+    })
+    .select('id')
+    .single()
+  if (insertErr || !postData) throw new Error(insertErr?.message ?? 'Failed to create post')
+
+  const newPostId = (postData as { id: string }).id
+
+  // 3. Mark the draft as queued (for audit)
+  await supabase.from('drafts').update({ status: 'queued' }).eq('id', id)
+
+  // 4. Publish via Meta Graph API immediately
+  await publishPostToMeta(supabase, newPostId, { allowAnyStatus: true })
+
+  // 5. Mark the draft as published too
+  await supabase.from('drafts').update({ status: 'published' }).eq('id', id)
+
+  revalidatePath('/drafts')
+  revalidatePath(`/drafts/${id}`)
+  revalidatePath(`/drafts/${newPostId}`)
+
+  return { postId: newPostId }
 }

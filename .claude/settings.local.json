@@ -18,7 +18,19 @@
       "Bash(node *)",
       "Bash(dir .next)",
       "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:3001/)",
-      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:3000/)"
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:3000/)",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)",
+      "Bash(cat next.config.js)",
+      "Bash(cat next.config.mjs)",
+      "Bash(cat next.config.ts)",
+      "Bash(git -C \"C:\\\\Users\\\\Lenovo\\\\brewcast\" status --short)",
+      "Bash(git -C \"C:\\\\Users\\\\Lenovo\\\\brewcast\" branch --show-current)",
+      "Bash(git -C \"C:\\\\Users\\\\Lenovo\\\\brewcast\" merge claude/peaceful-hoover-2df825 --no-ff -m \"Merge /upload feature branch into main\")",
+      "Bash(git -C \"C:\\\\Users\\\\Lenovo\\\\brewcast\" merge --ff-only claude/peaceful-hoover-2df825)",
+      "Bash(git -C \"C:\\\\Users\\\\Lenovo\\\\brewcast\" rev-parse --short HEAD)",
+      "Bash(echo \"OK — main is now at $\\(git -C \"C:\\\\Users\\\\Lenovo\\\\brewcast\" rev-parse --short HEAD\\)\")",
+      "Bash(echo \"OK — main at $\\(git -C \"C:\\\\Users\\\\Lenovo\\\\brewcast\" rev-parse --short HEAD\\)\")"
     ]
   }
 }
