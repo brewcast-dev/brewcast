@@ -1,4 +1,4 @@
-'use client'
+﻿'use client'
 
 import { useState, useRef } from 'react'
 import { addAllowedUser } from './actions'
@@ -23,32 +23,32 @@ export default function AddUserForm() {
   }
 
   return (
-    <form ref={formRef} onSubmit={handleSubmit} className="bg-zinc-900 border border-zinc-800 rounded-xl p-5 space-y-4">
+    <form ref={formRef} onSubmit={handleSubmit} className="bg-obsidian border border-white/[0.06] rounded-xl p-5 space-y-4">
       <h2 className="text-sm font-semibold text-white">Add allowed email</h2>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <div>
-          <label className="block text-xs text-zinc-400 mb-1">Email *</label>
+          <label className="block text-xs text-ash mb-1">Email *</label>
           <input
             name="email"
             type="email"
             required
             placeholder="owner@brewery.com"
-            className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-white text-sm placeholder-zinc-500 focus:outline-none focus:ring-2 focus:ring-amber-500"
+            className="w-full bg-onyx border border-white/[0.08] rounded-lg px-3 py-2 text-white text-sm placeholder-smoke focus:outline-none focus:ring-2 focus:ring-cream/30"
           />
         </div>
         <div>
-          <label className="block text-xs text-zinc-400 mb-1">Brewery name</label>
+          <label className="block text-xs text-ash mb-1">Brewery name</label>
           <input
             name="brewery_name"
             type="text"
             placeholder="Toit Brewpub"
-            className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-white text-sm placeholder-zinc-500 focus:outline-none focus:ring-2 focus:ring-amber-500"
+            className="w-full bg-onyx border border-white/[0.08] rounded-lg px-3 py-2 text-white text-sm placeholder-smoke focus:outline-none focus:ring-2 focus:ring-cream/30"
           />
         </div>
       </div>
 
-      <label className="flex items-center gap-2 text-sm text-zinc-300 cursor-pointer">
+      <label className="flex items-center gap-2 text-sm text-bone cursor-pointer">
         <input type="checkbox" name="is_admin" className="accent-amber-500" />
         Grant admin access (can manage other users)
       </label>
@@ -58,7 +58,7 @@ export default function AddUserForm() {
       <button
         type="submit"
         disabled={status === 'adding'}
-        className="bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-zinc-900 font-semibold rounded-lg px-4 py-2 text-sm transition-colors"
+        className="bg-cream hover:bg-bone disabled:opacity-50 text-cream font-semibold rounded-lg px-4 py-2 text-sm transition-colors"
       >
         {status === 'adding' ? 'Adding…' : 'Add user'}
       </button>

@@ -1,70 +1,84 @@
 import Link from 'next/link'
 
-export default function OnboardingPage() {
+export default function LandingPage() {
   return (
-    <main className="flex min-h-screen flex-col items-center justify-center p-8">
-      <div className="w-full max-w-md space-y-8">
-        {/* Logo */}
-        <div className="text-center space-y-3">
-          <h1 className="text-5xl font-bold tracking-tight text-amber-400">BrewCast</h1>
-          <p className="text-zinc-400 text-lg">AI-powered social media manager for your brewery</p>
-        </div>
-
-        {/* Setup card */}
-        <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-8 space-y-6">
-          <div className="space-y-2">
-            <h2 className="text-xl font-semibold text-zinc-100">Get started</h2>
-            <p className="text-zinc-500 text-sm leading-relaxed">
-              BrewCast helps you create Instagram &amp; Facebook content, generate reels, write captions,
-              and publish &mdash; all from a single chat interface.
-            </p>
-          </div>
-
-          <div className="space-y-3">
-            <div className="flex items-start gap-3 text-sm">
-              <span className="text-amber-400 mt-0.5 flex-shrink-0">①</span>
-              <div>
-                <p className="text-zinc-300 font-medium">Run the scrape script</p>
-                <p className="text-zinc-500 text-xs mt-0.5">
-                  Automatically pull your brewery&apos;s brand from your website:
-                </p>
-                <code className="block mt-1 text-xs bg-zinc-800 rounded px-2 py-1 text-amber-300 font-mono">
-                  npx ts-node scripts/scrape-brewery.ts https://yourbrewery.com
-                </code>
-              </div>
-            </div>
-            <div className="flex items-start gap-3 text-sm">
-              <span className="text-amber-400 mt-0.5 flex-shrink-0">②</span>
-              <div>
-                <p className="text-zinc-300 font-medium">Open the chat</p>
-                <p className="text-zinc-500 text-xs mt-0.5">
-                  Talk to BrewCast like you&apos;d brief a social media manager.
-                </p>
-              </div>
-            </div>
-            <div className="flex items-start gap-3 text-sm">
-              <span className="text-amber-400 mt-0.5 flex-shrink-0">③</span>
-              <div>
-                <p className="text-zinc-300 font-medium">Review & publish</p>
-                <p className="text-zinc-500 text-xs mt-0.5">
-                  Approve drafts, then publish directly to Instagram & Facebook.
-                </p>
-              </div>
-            </div>
-          </div>
-
-          <Link
-            href="/chat"
-            className="block w-full rounded-xl bg-amber-500 hover:bg-amber-400 text-zinc-950 font-bold text-center py-3.5 transition-colors"
-          >
-            Open BrewCast Chat →
-          </Link>
-        </div>
-
-        <p className="text-center text-xs text-zinc-600">
-          BrewCast PoC · Powered by Gemini + Groq · Publishes via Meta Graph API
-        </p>
+    <main className="relative min-h-screen overflow-hidden">
+      {/* Ambient gradient orbs — set the mood without imagery */}
+      <div className="pointer-events-none absolute inset-0 -z-0">
+        <div className="absolute top-[-20%] left-[-10%] w-[600px] h-[600px] rounded-full bg-ember/[0.06] blur-[120px]" />
+        <div className="absolute bottom-[-20%] right-[-10%] w-[500px] h-[500px] rounded-full bg-cream/[0.04] blur-[120px]" />
       </div>
+
+      <section className="relative max-w-6xl mx-auto px-6 pt-32 pb-24">
+        <div className="text-center space-y-8">
+          <span className="inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs text-ash hairline">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald" />
+            AI-powered social media for breweries
+          </span>
+
+          <h1 className="font-display text-6xl md:text-7xl lg:text-8xl text-cream tracking-tight leading-[0.95] text-balance">
+            Pour your story.<br />
+            <span className="italic text-bone">We&apos;ll post it.</span>
+          </h1>
+
+          <p className="text-ash text-lg md:text-xl max-w-xl mx-auto leading-relaxed">
+            BrewCast drafts Instagram &amp; Facebook posts, edits photos, schedules
+            publishing — all from a single brief.
+          </p>
+
+          <div className="flex items-center justify-center gap-3 pt-2">
+            <Link
+              href="/chat"
+              className="px-6 py-3 rounded-full bg-cream text-ink font-medium hover:bg-bone transition-colors"
+            >
+              Open the chat
+            </Link>
+            <Link
+              href="/upload"
+              className="px-6 py-3 rounded-full hairline text-cream hover:bg-white/[0.04] transition-colors"
+            >
+              Bulk upload photos
+            </Link>
+          </div>
+        </div>
+      </section>
+
+      <section className="relative max-w-5xl mx-auto px-6 pb-32">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          {[
+            {
+              num: '01',
+              title: 'Brief in plain English',
+              body: 'Tell BrewCast what to post. It writes captions, picks hashtags, suggests filters.',
+            },
+            {
+              num: '02',
+              title: 'Review &amp; refine',
+              body: 'Every draft lands in your queue. Edit, approve, schedule — your call.',
+            },
+            {
+              num: '03',
+              title: 'Publish on autopilot',
+              body: 'Scheduled posts ship to Instagram and Facebook via the Meta Graph API.',
+            },
+          ].map((step) => (
+            <div
+              key={step.num}
+              className="rounded-2xl bg-obsidian hairline p-6 hover:bg-onyx transition-colors"
+            >
+              <div className="font-display text-2xl text-ember/80 mb-3">{step.num}</div>
+              <h3 className="font-display text-xl text-cream mb-2" dangerouslySetInnerHTML={{ __html: step.title }} />
+              <p className="text-ash text-sm leading-relaxed">{step.body}</p>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <footer className="relative border-t border-white/[0.04] py-8">
+        <p className="text-center text-xs text-smoke">
+          BrewCast · Powered by Gemini, Groq, Mistral · Publishes via Meta Graph API
+        </p>
+      </footer>
     </main>
   )
 }

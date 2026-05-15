@@ -1,4 +1,4 @@
-'use client'
+﻿'use client'
 
 import { useState } from 'react'
 import { removeAllowedUser, toggleAdmin } from './actions'
@@ -26,15 +26,15 @@ export default function UserRow({ user }: { user: AllowedUser }) {
   }
 
   return (
-    <tr className="border-t border-zinc-800">
+    <tr className="border-t border-white/[0.06]">
       <td className="py-3 px-4 text-sm text-white">{user.email}</td>
-      <td className="py-3 px-4 text-sm text-zinc-400">{user.brewery_name ?? '—'}</td>
+      <td className="py-3 px-4 text-sm text-ash">{user.brewery_name ?? '—'}</td>
       <td className="py-3 px-4 text-sm">
         <span
           className={`px-2 py-0.5 rounded-full text-xs font-medium ${
             user.user_id
               ? 'bg-emerald-950 text-emerald-400'
-              : 'bg-zinc-800 text-zinc-500'
+              : 'bg-onyx text-ash'
           }`}
         >
           {user.user_id ? 'Active' : 'Pending'}
@@ -45,14 +45,14 @@ export default function UserRow({ user }: { user: AllowedUser }) {
           onClick={handleToggleAdmin}
           className={`text-xs px-2 py-0.5 rounded-full font-medium transition-colors ${
             user.is_admin
-              ? 'bg-amber-950 text-amber-400 hover:bg-amber-900'
-              : 'bg-zinc-800 text-zinc-500 hover:bg-zinc-700'
+              ? 'bg-ember/15 text-cream hover:bg-ember/20'
+              : 'bg-onyx text-ash hover:bg-slate'
           }`}
         >
           {user.is_admin ? 'Admin' : 'User'}
         </button>
       </td>
-      <td className="py-3 px-4 text-sm text-zinc-500">
+      <td className="py-3 px-4 text-sm text-ash">
         {new Date(user.created_at).toLocaleDateString()}
       </td>
       <td className="py-3 px-4">

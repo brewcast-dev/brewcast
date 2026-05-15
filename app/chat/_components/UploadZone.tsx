@@ -1,4 +1,4 @@
-'use client'
+﻿'use client'
 
 import { useCallback, useRef, useState } from 'react'
 
@@ -77,7 +77,7 @@ export default function UploadZone({ uploadUrl, publicUrl, contentType, onComple
   return (
     <div
       className={`rounded-xl border-2 border-dashed p-6 text-center cursor-pointer transition-colors
-        ${dragging ? 'border-amber-400 bg-amber-400/10' : 'border-zinc-600 bg-zinc-800 hover:border-zinc-500'}`}
+        ${dragging ? 'border-cream/30 bg-bone/10' : 'border-white/[0.10] bg-onyx hover:border-white/[0.10]'}`}
       onDragOver={(e) => {
         e.preventDefault()
         if (!dragOver.current) { setDragging(true); dragOver.current = true }
@@ -90,10 +90,10 @@ export default function UploadZone({ uploadUrl, publicUrl, contentType, onComple
 
       {progress !== null ? (
         <div className="space-y-2">
-          <p className="text-sm text-zinc-400">Uploading… {progress}%</p>
-          <div className="h-1.5 bg-zinc-700 rounded-full overflow-hidden">
+          <p className="text-sm text-ash">Uploading… {progress}%</p>
+          <div className="h-1.5 bg-slate rounded-full overflow-hidden">
             <div
-              className="h-full bg-amber-400 transition-all duration-200"
+              className="h-full bg-bone transition-all duration-200"
               style={{ width: `${progress}%` }}
             />
           </div>
@@ -101,12 +101,12 @@ export default function UploadZone({ uploadUrl, publicUrl, contentType, onComple
       ) : (
         <div className="space-y-1">
           <p className="text-2xl">📎</p>
-          <p className="text-sm text-zinc-300">
+          <p className="text-sm text-bone">
             {contentType.startsWith('video')
               ? 'Drop a video clip here (MP4, max 60s)'
               : 'Drop an image here (JPG / PNG / WEBP)'}
           </p>
-          <p className="text-xs text-zinc-500">or click to browse</p>
+          <p className="text-xs text-ash">or click to browse</p>
         </div>
       )}
 

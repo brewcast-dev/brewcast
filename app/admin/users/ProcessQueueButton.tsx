@@ -1,4 +1,4 @@
-'use client'
+﻿'use client'
 
 import { useState } from 'react'
 import { processQueueNow } from './actions'
@@ -24,20 +24,20 @@ export default function ProcessQueueButton() {
   }
 
   return (
-    <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-5 space-y-3">
+    <div className="bg-obsidian border border-white/[0.06] rounded-xl p-5 space-y-3">
       <div className="flex items-start justify-between gap-4">
         <div>
           <h2 className="text-sm font-semibold text-white">Process queue now</h2>
-          <p className="text-xs text-zinc-400 mt-1">
+          <p className="text-xs text-ash mt-1">
             Runs the same endpoint the GitHub Actions cron hits. Publishes any
-            posts whose <code className="text-amber-400">scheduled_at</code> is
-            in the past and status is <code className="text-amber-400">queued</code>.
+            posts whose <code className="text-cream">scheduled_at</code> is
+            in the past and status is <code className="text-cream">queued</code>.
           </p>
         </div>
         <button
           onClick={handleClick}
           disabled={status === 'running'}
-          className="bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-zinc-900 font-semibold rounded-lg px-4 py-2 text-sm transition-colors flex-shrink-0"
+          className="bg-cream hover:bg-bone disabled:opacity-50 text-cream font-semibold rounded-lg px-4 py-2 text-sm transition-colors flex-shrink-0"
         >
           {status === 'running' ? 'Running…' : 'Run now'}
         </button>
@@ -47,7 +47,7 @@ export default function ProcessQueueButton() {
         <div
           className={`text-sm rounded-lg px-3 py-2 ${
             result.error
-              ? 'bg-red-950 border border-red-800 text-red-300'
+              ? 'bg-red-950/40 border border-red-900/50 text-red-300'
               : 'bg-emerald-950 border border-emerald-800 text-emerald-300'
           }`}
         >

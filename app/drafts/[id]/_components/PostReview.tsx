@@ -1,4 +1,4 @@
-'use client'
+﻿'use client'
 
 import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
@@ -22,10 +22,10 @@ function daysUntilPurge(archivedAt: string): number {
 }
 
 const STATUS_STYLES: Record<PostStatus, string> = {
-  draft: 'bg-zinc-700 text-zinc-300',
-  approved: 'bg-blue-900 text-blue-300',
-  queued: 'bg-amber-900 text-amber-300',
-  published: 'bg-green-900 text-green-300',
+  draft: 'bg-slate text-bone',
+  approved: 'bg-sky-500/15 text-sky-300',
+  queued: 'bg-ember/20 text-ember',
+  published: 'bg-green-900 text-emerald',
   failed: 'bg-red-900 text-red-300',
 }
 
@@ -60,7 +60,7 @@ export default function PostReview({ post }: { post: Post }) {
   const [confirmPublish, setConfirmPublish] = useState(false)
   const [confirmPurge, setConfirmPurge] = useState(false)
   const mediaUrls = post.media_urls ?? []
-  const statusStyle = STATUS_STYLES[post.status] ?? 'bg-zinc-700 text-zinc-300'
+  const statusStyle = STATUS_STYLES[post.status] ?? 'bg-slate text-bone'
   const isArchived = !!post.archived_at
   const canEdit = post.status !== 'published' && !isArchived
   const canArchive = !isArchived
@@ -71,7 +71,7 @@ export default function PostReview({ post }: { post: Post }) {
       {/* ── Left: content preview ── */}
       <div className="flex-1 min-w-0 space-y-6">
         <div className="flex items-center gap-3">
-          <h1 className="text-xl font-bold text-zinc-100">Post Review</h1>
+          <h1 className="text-xl font-bold text-cream">Post Review</h1>
           <span className={`px-2.5 py-0.5 rounded text-xs font-medium ${statusStyle}`}>
             {post.status}
           </span>
@@ -79,7 +79,7 @@ export default function PostReview({ post }: { post: Post }) {
 
         {/* Video */}
         {post.video_url && (
-          <div className="rounded-xl overflow-hidden bg-zinc-800 aspect-video">
+          <div className="rounded-xl overflow-hidden bg-onyx aspect-video">
             <video
               src={post.video_url}
               controls
@@ -93,7 +93,7 @@ export default function PostReview({ post }: { post: Post }) {
         {!post.video_url && mediaUrls.length > 0 && (
           <div className={`grid gap-2 ${mediaUrls.length === 1 ? 'grid-cols-1' : 'grid-cols-2'}`}>
             {mediaUrls.map((url, i) => (
-              <div key={i} className="relative aspect-square rounded-xl overflow-hidden bg-zinc-800">
+              <div key={i} className="relative aspect-square rounded-xl overflow-hidden bg-onyx">
                 <Image src={url} alt={`Media ${i + 1}`} fill className="object-cover" />
               </div>
             ))}
@@ -102,15 +102,15 @@ export default function PostReview({ post }: { post: Post }) {
 
         {/* No media placeholder */}
         {!post.video_url && mediaUrls.length === 0 && (
-          <div className="rounded-xl border-2 border-dashed border-zinc-800 aspect-video flex items-center justify-center">
-            <p className="text-zinc-600 text-sm">No media attached</p>
+          <div className="rounded-xl border-2 border-dashed border-white/[0.06] aspect-video flex items-center justify-center">
+            <p className="text-smoke text-sm">No media attached</p>
           </div>
         )}
 
         {/* Voiceover */}
         {post.audio_url && (
           <div className="space-y-1.5">
-            <p className="text-xs font-medium text-zinc-500 uppercase tracking-wide">Voiceover</p>
+            <p className="text-xs font-medium text-ash uppercase tracking-wide">Voiceover</p>
             {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
             <audio src={post.audio_url} controls className="w-full" />
           </div>
@@ -118,12 +118,12 @@ export default function PostReview({ post }: { post: Post }) {
 
         {/* Caption */}
         <div className="space-y-2">
-          <p className="text-xs font-medium text-zinc-500 uppercase tracking-wide">Caption</p>
-          <div className="rounded-xl border border-zinc-800 bg-zinc-900 p-4">
+          <p className="text-xs font-medium text-ash uppercase tracking-wide">Caption</p>
+          <div className="rounded-xl border border-white/[0.06] bg-obsidian p-4">
             {post.caption ? (
-              <p className="text-sm text-zinc-200 whitespace-pre-wrap">{post.caption}</p>
+              <p className="text-sm text-cream whitespace-pre-wrap">{post.caption}</p>
             ) : (
-              <p className="text-sm text-zinc-600 italic">No caption</p>
+              <p className="text-sm text-smoke italic">No caption</p>
             )}
           </div>
         </div>
@@ -132,31 +132,31 @@ export default function PostReview({ post }: { post: Post }) {
       {/* ── Right: metadata + actions ── */}
       <div className="lg:w-72 flex-shrink-0 space-y-4">
         {/* Details */}
-        <div className="rounded-xl border border-zinc-800 bg-zinc-900 p-4 space-y-3">
-          <p className="text-xs font-medium text-zinc-500 uppercase tracking-wide">Details</p>
+        <div className="rounded-xl border border-white/[0.06] bg-obsidian p-4 space-y-3">
+          <p className="text-xs font-medium text-ash uppercase tracking-wide">Details</p>
           <dl className="space-y-2 text-sm">
             <div className="flex justify-between">
-              <dt className="text-zinc-500">Platform</dt>
-              <dd className="text-zinc-200 capitalize">{post.platform}</dd>
+              <dt className="text-ash">Platform</dt>
+              <dd className="text-cream capitalize">{post.platform}</dd>
             </div>
             <div className="flex justify-between">
-              <dt className="text-zinc-500">Type</dt>
-              <dd className="text-zinc-200 capitalize">{post.content_type}</dd>
+              <dt className="text-ash">Type</dt>
+              <dd className="text-cream capitalize">{post.content_type}</dd>
             </div>
             <div className="flex justify-between">
-              <dt className="text-zinc-500">Created</dt>
-              <dd className="text-zinc-200">{new Date(post.created_at).toLocaleDateString()}</dd>
+              <dt className="text-ash">Created</dt>
+              <dd className="text-cream">{new Date(post.created_at).toLocaleDateString()}</dd>
             </div>
             {post.published_at && (
               <div className="flex justify-between">
-                <dt className="text-zinc-500">Published</dt>
-                <dd className="text-zinc-200">{new Date(post.published_at).toLocaleString()}</dd>
+                <dt className="text-ash">Published</dt>
+                <dd className="text-cream">{new Date(post.published_at).toLocaleString()}</dd>
               </div>
             )}
             {post.meta_post_id && (
               <div className="flex justify-between gap-2">
-                <dt className="text-zinc-500 flex-shrink-0">Meta ID</dt>
-                <dd className="text-zinc-400 font-mono text-xs truncate">{post.meta_post_id}</dd>
+                <dt className="text-ash flex-shrink-0">Meta ID</dt>
+                <dd className="text-ash font-mono text-xs truncate">{post.meta_post_id}</dd>
               </div>
             )}
           </dl>
@@ -164,7 +164,7 @@ export default function PostReview({ post }: { post: Post }) {
 
         {/* Error */}
         {error && (
-          <div className="rounded-xl border border-red-800 bg-red-950 px-3 py-2 text-sm text-red-300">
+          <div className="rounded-xl border border-red-900/50 bg-red-950/40 px-3 py-2 text-sm text-red-300">
             {error}
           </div>
         )}
@@ -174,7 +174,7 @@ export default function PostReview({ post }: { post: Post }) {
           <button
             onClick={() => run(() => approvePost(post.id))}
             disabled={isPending}
-            className="w-full px-4 py-2.5 rounded-lg bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-sm font-medium transition-colors"
+            className="w-full px-4 py-2.5 rounded-lg bg-sky-500/20 hover:bg-sky-500/30 disabled:opacity-50 text-white text-sm font-medium transition-colors"
           >
             {isPending ? 'Saving…' : 'Approve'}
           </button>
@@ -183,14 +183,14 @@ export default function PostReview({ post }: { post: Post }) {
         {/* Schedule + queue */}
         {canEdit && (post.status === 'draft' || post.status === 'approved' || post.status === 'failed') && (
           <div className="space-y-2">
-            <label className="text-xs font-medium text-zinc-500 uppercase tracking-wide">
+            <label className="text-xs font-medium text-ash uppercase tracking-wide">
               Schedule
             </label>
             <input
               type="datetime-local"
               value={scheduledAt}
               onChange={(e) => setScheduledAt(e.target.value)}
-              className="w-full rounded-lg bg-zinc-800 border border-zinc-700 px-3 py-2 text-sm text-zinc-200 focus:outline-none focus:border-amber-500 transition-colors"
+              className="w-full rounded-lg bg-onyx border border-white/[0.08] px-3 py-2 text-sm text-cream focus:outline-none focus:border-cream/30 transition-colors"
             />
             <button
               onClick={() => {
@@ -201,7 +201,7 @@ export default function PostReview({ post }: { post: Post }) {
                 run(() => queuePost(post.id, utcIso))
               }}
               disabled={isPending}
-              className="w-full px-4 py-2.5 rounded-lg bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-zinc-950 text-sm font-medium transition-colors"
+              className="w-full px-4 py-2.5 rounded-lg bg-cream hover:bg-bone disabled:opacity-50 text-ink text-sm font-medium transition-colors"
             >
               {isPending ? 'Saving…' : 'Queue for publishing'}
             </button>
@@ -210,7 +210,7 @@ export default function PostReview({ post }: { post: Post }) {
 
         {/* Queued status */}
         {post.status === 'queued' && (
-          <div className="rounded-xl border border-amber-800 bg-amber-950 px-3 py-3 text-sm text-amber-300">
+          <div className="rounded-xl border border-ember/30 bg-ember/15 px-3 py-3 text-sm text-ember">
             Queued
             {post.scheduled_at && ` · ${new Date(post.scheduled_at).toLocaleString()}`}
           </div>
@@ -219,22 +219,22 @@ export default function PostReview({ post }: { post: Post }) {
         {/* Publish Now — bypasses the scheduler and publishes immediately */}
         {canPublishNow && (
           confirmPublish ? (
-            <div className="space-y-2 rounded-xl border border-green-800 bg-green-950/40 p-3">
-              <p className="text-xs text-green-300 text-center">
+            <div className="space-y-2 rounded-xl border border-emerald/30 bg-emerald/10/40 p-3">
+              <p className="text-xs text-emerald text-center">
                 Publish this to Instagram/Facebook right now?
               </p>
               <div className="flex gap-2">
                 <button
                   onClick={() => setConfirmPublish(false)}
                   disabled={isPending}
-                  className="flex-1 px-3 py-2 rounded-lg border border-zinc-700 text-zinc-400 text-sm hover:bg-zinc-800 transition-colors"
+                  className="flex-1 px-3 py-2 rounded-lg border border-white/[0.08] text-ash text-sm hover:bg-onyx transition-colors"
                 >
                   Cancel
                 </button>
                 <button
                   onClick={() => run(() => publishPostNow(post.id))}
                   disabled={isPending}
-                  className="flex-1 px-3 py-2 rounded-lg bg-green-600 hover:bg-green-500 disabled:opacity-50 text-white text-sm font-medium transition-colors"
+                  className="flex-1 px-3 py-2 rounded-lg bg-emerald hover:bg-emerald/80 disabled:opacity-50 text-white text-sm font-medium transition-colors"
                 >
                   {isPending ? 'Publishing…' : 'Publish'}
                 </button>
@@ -244,7 +244,7 @@ export default function PostReview({ post }: { post: Post }) {
             <button
               onClick={() => setConfirmPublish(true)}
               disabled={isPending}
-              className="w-full px-4 py-2.5 rounded-lg bg-green-600 hover:bg-green-500 disabled:opacity-50 text-white text-sm font-medium transition-colors"
+              className="w-full px-4 py-2.5 rounded-lg bg-emerald hover:bg-emerald/80 disabled:opacity-50 text-white text-sm font-medium transition-colors"
             >
               Publish now
             </button>
@@ -253,7 +253,7 @@ export default function PostReview({ post }: { post: Post }) {
 
         {/* Published status */}
         {post.status === 'published' && (
-          <div className="rounded-xl border border-green-800 bg-green-950 px-3 py-3 text-sm text-green-300">
+          <div className="rounded-xl border border-emerald/30 bg-emerald/10 px-3 py-3 text-sm text-emerald">
             Published
             {post.published_at && ` · ${new Date(post.published_at).toLocaleString()}`}
           </div>
@@ -261,8 +261,8 @@ export default function PostReview({ post }: { post: Post }) {
 
         {/* Archive / Restore / Permanent delete */}
         {isArchived ? (
-          <div className="space-y-2 rounded-xl border border-amber-800 bg-amber-950/40 p-3">
-            <p className="text-xs text-amber-300 text-center">
+          <div className="space-y-2 rounded-xl border border-ember/30 bg-ember/15/40 p-3">
+            <p className="text-xs text-ember text-center">
               In archive · auto-deletes in{' '}
               {daysUntilPurge(post.archived_at!)} day
               {daysUntilPurge(post.archived_at!) !== 1 ? 's' : ''}
@@ -270,7 +270,7 @@ export default function PostReview({ post }: { post: Post }) {
             <button
               onClick={() => run(() => restorePost(post.id))}
               disabled={isPending}
-              className="w-full px-3 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-sm font-medium transition-colors"
+              className="w-full px-3 py-2 rounded-lg bg-sky-500/20 hover:bg-sky-500/30 disabled:opacity-50 text-white text-sm font-medium transition-colors"
             >
               {isPending ? 'Restoring…' : 'Restore'}
             </button>
@@ -278,7 +278,7 @@ export default function PostReview({ post }: { post: Post }) {
               <div className="flex gap-2">
                 <button
                   onClick={() => setConfirmPurge(false)}
-                  className="flex-1 px-3 py-2 rounded-lg border border-zinc-700 text-zinc-400 text-xs hover:bg-zinc-800 transition-colors"
+                  className="flex-1 px-3 py-2 rounded-lg border border-white/[0.08] text-ash text-xs hover:bg-onyx transition-colors"
                 >
                   Cancel
                 </button>
@@ -294,7 +294,7 @@ export default function PostReview({ post }: { post: Post }) {
               <button
                 onClick={() => setConfirmPurge(true)}
                 disabled={isPending}
-                className="w-full px-3 py-2 rounded-lg border border-zinc-700 hover:border-red-800 hover:text-red-400 disabled:opacity-50 text-zinc-500 text-xs transition-colors"
+                className="w-full px-3 py-2 rounded-lg border border-white/[0.08] hover:border-red-900/50 hover:text-red-400 disabled:opacity-50 text-ash text-xs transition-colors"
               >
                 Delete permanently
               </button>
@@ -304,20 +304,20 @@ export default function PostReview({ post }: { post: Post }) {
           canArchive && (
             confirmDelete ? (
               <div className="space-y-2">
-                <p className="text-xs text-amber-400 text-center">
+                <p className="text-xs text-cream text-center">
                   Archive moves this to /drafts?status=archived. You have 30 days to restore.
                 </p>
                 <div className="flex gap-2">
                   <button
                     onClick={() => setConfirmDelete(false)}
-                    className="flex-1 px-3 py-2 rounded-lg border border-zinc-700 text-zinc-400 text-sm hover:bg-zinc-800 transition-colors"
+                    className="flex-1 px-3 py-2 rounded-lg border border-white/[0.08] text-ash text-sm hover:bg-onyx transition-colors"
                   >
                     Cancel
                   </button>
                   <button
                     onClick={() => run(() => archivePost(post.id), () => router.push('/drafts'))}
                     disabled={isPending}
-                    className="flex-1 px-3 py-2 rounded-lg bg-amber-700 hover:bg-amber-600 disabled:opacity-50 text-amber-50 text-sm font-medium transition-colors"
+                    className="flex-1 px-3 py-2 rounded-lg bg-ember/40 hover:bg-cream disabled:opacity-50 text-cream text-sm font-medium transition-colors"
                   >
                     {isPending ? 'Archiving…' : 'Archive'}
                   </button>
@@ -327,7 +327,7 @@ export default function PostReview({ post }: { post: Post }) {
               <button
                 onClick={() => setConfirmDelete(true)}
                 disabled={isPending}
-                className="w-full px-4 py-2.5 rounded-lg border border-zinc-700 hover:border-amber-700 hover:text-amber-400 disabled:opacity-50 text-zinc-500 text-sm transition-colors"
+                className="w-full px-4 py-2.5 rounded-lg border border-white/[0.08] hover:border-ember/30 hover:text-cream disabled:opacity-50 text-ash text-sm transition-colors"
               >
                 Archive draft
               </button>

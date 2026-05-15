@@ -1,4 +1,4 @@
-'use client'
+﻿'use client'
 
 import { useRef, useCallback, type KeyboardEvent } from 'react'
 
@@ -38,8 +38,8 @@ export default function InputBar({ value, onChange, onSend, onStop, disabled, is
   )
 
   return (
-    <div className="border-t border-zinc-800 bg-zinc-950 p-4">
-      <div className="flex items-end gap-3 rounded-2xl border border-zinc-700 bg-zinc-900 px-4 py-3 focus-within:border-amber-500/50 transition-colors">
+    <div className="border-t border-white/[0.06] bg-ink p-4">
+      <div className="flex items-end gap-3 rounded-2xl border border-white/[0.08] bg-obsidian px-4 py-3 focus-within:border-cream/30/50 transition-colors">
         <textarea
           ref={textareaRef}
           value={value}
@@ -48,26 +48,26 @@ export default function InputBar({ value, onChange, onSend, onStop, disabled, is
           placeholder="Message BrewCast…"
           rows={1}
           disabled={disabled && !isStreaming}
-          className="flex-1 resize-none bg-transparent text-sm text-zinc-100 placeholder-zinc-500 outline-none leading-relaxed disabled:opacity-50"
+          className="flex-1 resize-none bg-transparent text-sm text-cream placeholder-smoke outline-none leading-relaxed disabled:opacity-50"
           style={{ minHeight: '24px', maxHeight: '200px' }}
         />
         {isStreaming ? (
           <button
             onClick={onStop}
-            className="flex-shrink-0 w-8 h-8 rounded-full bg-zinc-700 hover:bg-zinc-600 flex items-center justify-center transition-colors"
+            className="flex-shrink-0 w-8 h-8 rounded-full bg-slate hover:bg-onyx flex items-center justify-center transition-colors"
             title="Stop generation"
           >
-            <span className="w-2.5 h-2.5 bg-zinc-300 rounded-sm" />
+            <span className="w-2.5 h-2.5 bg-bone rounded-sm" />
           </button>
         ) : (
           <button
             onClick={onSend}
             disabled={disabled || !value.trim()}
-            className="flex-shrink-0 w-8 h-8 rounded-full bg-amber-500 hover:bg-amber-400 disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center transition-colors"
+            className="flex-shrink-0 w-8 h-8 rounded-full bg-cream hover:bg-bone disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center transition-colors"
             title="Send (Enter)"
           >
             <svg
-              className="w-3.5 h-3.5 text-zinc-950 rotate-90"
+              className="w-3.5 h-3.5 text-ink rotate-90"
               fill="currentColor"
               viewBox="0 0 20 20"
             >
@@ -76,7 +76,7 @@ export default function InputBar({ value, onChange, onSend, onStop, disabled, is
           </button>
         )}
       </div>
-      <p className="mt-1.5 text-center text-xs text-zinc-600">
+      <p className="mt-1.5 text-center text-xs text-smoke">
         Enter to send · Shift+Enter for new line
       </p>
     </div>

@@ -40,20 +40,16 @@ export default async function DraftReviewPage({ params }: { params: { id: string
 function Layout({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <div className="min-h-screen flex flex-col">
-      <header className="sticky top-0 z-10 flex items-center px-6 py-2 border-b border-zinc-800 bg-zinc-900">
-        <div className="flex items-center gap-3 min-w-0">
-          <Link
-            href="/drafts"
-            className="flex-shrink-0 text-zinc-400 hover:text-zinc-200 text-sm transition-colors"
-          >
+      <main className="flex-1 max-w-5xl mx-auto w-full px-6 pt-28 pb-12">
+        <nav className="flex items-center gap-3 text-sm mb-8">
+          <Link href="/drafts" className="text-ash hover:text-cream transition-colors">
             ← Drafts
           </Link>
-          <span className="text-zinc-700">/</span>
-          <span className="text-zinc-400 text-sm truncate capitalize">{title}</span>
-        </div>
-      </header>
-
-      <main className="flex-1 max-w-5xl mx-auto w-full px-6 py-8">{children}</main>
+          <span className="text-smoke">/</span>
+          <span className="text-cream truncate capitalize font-display italic">{title}</span>
+        </nav>
+        {children}
+      </main>
     </div>
   )
 }

@@ -1,4 +1,4 @@
-'use client'
+﻿'use client'
 
 import Image from 'next/image'
 import Link from 'next/link'
@@ -22,15 +22,15 @@ export default function ToolCard({ toolName, state, input, output, onUploadCompl
     if (isRunning) return <RunningCard label="Generating image…" />
     if (!url) return null
     return (
-      <div className="rounded-xl border border-zinc-700 bg-zinc-800 overflow-hidden w-52">
-        <div className="relative w-52 h-52 bg-zinc-900">
+      <div className="rounded-xl border border-white/[0.08] bg-onyx overflow-hidden w-52">
+        <div className="relative w-52 h-52 bg-obsidian">
           <Image src={url} alt="Generated" fill className="object-cover" />
         </div>
         <div className="p-3 space-y-2">
-          <p className="text-xs text-zinc-400 truncate">{input.prompt as string}</p>
+          <p className="text-xs text-ash truncate">{input.prompt as string}</p>
           <button
             onClick={() => onUploadComplete?.(url)}
-            className="w-full text-xs py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-zinc-950 font-semibold transition-colors"
+            className="w-full text-xs py-1.5 rounded-lg bg-cream hover:bg-bone text-ink font-semibold transition-colors"
           >
             Use this image
           </button>
@@ -63,20 +63,20 @@ export default function ToolCard({ toolName, state, input, output, onUploadCompl
     const caption = (input.caption as string | undefined) ?? ''
     if (!reviewUrl) return null
     return (
-      <div className="rounded-xl border border-zinc-700 bg-zinc-800 p-4 space-y-3 max-w-sm">
+      <div className="rounded-xl border border-white/[0.08] bg-onyx p-4 space-y-3 max-w-sm">
         <div className="flex items-center gap-2">
           <span className="text-lg">📋</span>
-          <span className="font-semibold text-sm text-zinc-100">Draft saved</span>
+          <span className="font-semibold text-sm text-cream">Draft saved</span>
         </div>
         {thumbnailUrl && (
-          <div className="relative h-28 rounded-lg overflow-hidden bg-zinc-900">
+          <div className="relative h-28 rounded-lg overflow-hidden bg-obsidian">
             <Image src={thumbnailUrl} alt="Thumbnail" fill className="object-cover" />
           </div>
         )}
-        <p className="text-xs text-zinc-400 line-clamp-2">{caption}</p>
+        <p className="text-xs text-ash line-clamp-2">{caption}</p>
         <Link
           href={reviewUrl}
-          className="flex items-center justify-center gap-1.5 w-full py-2 rounded-lg bg-amber-500 hover:bg-amber-400 text-zinc-950 font-semibold text-sm transition-colors"
+          className="flex items-center justify-center gap-1.5 w-full py-2 rounded-lg bg-cream hover:bg-bone text-ink font-semibold text-sm transition-colors"
         >
           Review draft →
         </Link>
@@ -88,9 +88,9 @@ export default function ToolCard({ toolName, state, input, output, onUploadCompl
   if (toolName === 'publish_post') {
     if (isRunning) {
       return (
-        <div className="rounded-xl border border-zinc-700 bg-zinc-800 p-4 flex items-center gap-3">
+        <div className="rounded-xl border border-white/[0.08] bg-onyx p-4 flex items-center gap-3">
           <Spinner />
-          <span className="text-sm text-zinc-300">Publishing to {
+          <span className="text-sm text-bone">Publishing to {
             (input.platform as string) ?? 'Instagram / Facebook'
           }…</span>
         </div>
@@ -115,9 +115,9 @@ export default function ToolCard({ toolName, state, input, output, onUploadCompl
   if (toolName === 'compose_reel') {
     if (isRunning) {
       return (
-        <div className="rounded-xl border border-zinc-700 bg-zinc-800 p-4 flex items-center gap-3">
+        <div className="rounded-xl border border-white/[0.08] bg-onyx p-4 flex items-center gap-3">
           <Spinner />
-          <span className="text-sm text-zinc-300">Composing your reel… this takes ~30 seconds</span>
+          <span className="text-sm text-bone">Composing your reel… this takes ~30 seconds</span>
         </div>
       )
     }
@@ -125,9 +125,9 @@ export default function ToolCard({ toolName, state, input, output, onUploadCompl
     const thumbnail = output?.thumbnail_url as string | undefined
     if (!videoUrl) return null
     return (
-      <div className="rounded-xl border border-zinc-700 bg-zinc-800 overflow-hidden max-w-xs">
+      <div className="rounded-xl border border-white/[0.08] bg-onyx overflow-hidden max-w-xs">
         {thumbnail && (
-          <div className="relative h-48 bg-zinc-900">
+          <div className="relative h-48 bg-obsidian">
             <Image src={thumbnail} alt="Reel thumbnail" fill className="object-cover" />
           </div>
         )}
@@ -143,8 +143,8 @@ export default function ToolCard({ toolName, state, input, output, onUploadCompl
     if (isRunning) return <RunningCard label="Fetching analytics…" />
     if (!output) return null
     return (
-      <div className="rounded-xl border border-zinc-700 bg-zinc-800 p-4 space-y-3">
-        <p className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">Analytics</p>
+      <div className="rounded-xl border border-white/[0.08] bg-onyx p-4 space-y-3">
+        <p className="text-xs font-semibold text-ash uppercase tracking-wider">Analytics</p>
         <div className="grid grid-cols-3 gap-3">
           <MetricTile label="Reach" value={String(output.total_reach ?? 0)} />
           <MetricTile label="Engagement" value={`${output.avg_engagement_rate ?? 0}%`} />
@@ -163,28 +163,28 @@ export default function ToolCard({ toolName, state, input, output, onUploadCompl
     if (isRunning) return <RunningCard label="Generating ad targeting strategy…" />
     if (!output) return null
     return (
-      <div className="rounded-xl border border-zinc-700 bg-zinc-800 p-4 space-y-2 max-w-sm">
-        <p className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">Ad targeting</p>
-        <div className="text-xs space-y-1 text-zinc-300">
+      <div className="rounded-xl border border-white/[0.08] bg-onyx p-4 space-y-2 max-w-sm">
+        <p className="text-xs font-semibold text-ash uppercase tracking-wider">Ad targeting</p>
+        <div className="text-xs space-y-1 text-bone">
           {!!output.age_range && (
             <p>
-              <span className="text-zinc-500">Ages:</span>{' '}
+              <span className="text-ash">Ages:</span>{' '}
               {(output.age_range as { min: number; max: number }).min}–{(output.age_range as { min: number; max: number }).max}
             </p>
           )}
           {!!output.objective && (
             <p>
-              <span className="text-zinc-500">Objective:</span> {String(output.objective)}
+              <span className="text-ash">Objective:</span> {String(output.objective)}
             </p>
           )}
           {!!output.daily_budget_usd && (
             <p>
-              <span className="text-zinc-500">Daily budget:</span> ${String(output.daily_budget_usd)}/day
+              <span className="text-ash">Daily budget:</span> ${String(output.daily_budget_usd)}/day
             </p>
           )}
           {!!output.interests && (
             <p>
-              <span className="text-zinc-500">Interests:</span>{' '}
+              <span className="text-ash">Interests:</span>{' '}
               {(output.interests as string[]).slice(0, 3).join(', ')}
             </p>
           )}
@@ -205,8 +205,8 @@ export default function ToolCard({ toolName, state, input, output, onUploadCompl
     const audioUrl = output?.audio_url as string | undefined
     if (!audioUrl) return null
     return (
-      <div className="rounded-xl border border-zinc-700 bg-zinc-800 p-3 space-y-1.5">
-        <p className="text-xs text-zinc-400">
+      <div className="rounded-xl border border-white/[0.08] bg-onyx p-3 space-y-1.5">
+        <p className="text-xs text-ash">
           {toolName === 'generate_voiceover' ? '🎙️ Voiceover' : '🎵 Background music'}
         </p>
         <audio controls src={audioUrl} className="w-full h-8" />
@@ -246,9 +246,9 @@ export default function ToolCard({ toolName, state, input, output, onUploadCompl
 
 function RunningCard({ label }: { label: string }) {
   return (
-    <div className="flex items-center gap-2.5 rounded-xl border border-zinc-700 bg-zinc-800 px-3 py-2">
+    <div className="flex items-center gap-2.5 rounded-xl border border-white/[0.08] bg-onyx px-3 py-2">
       <Spinner />
-      <span className="text-sm text-zinc-400">{label}</span>
+      <span className="text-sm text-ash">{label}</span>
     </div>
   )
 }
@@ -256,7 +256,7 @@ function RunningCard({ label }: { label: string }) {
 function Spinner() {
   return (
     <svg
-      className="animate-spin h-4 w-4 text-amber-400 flex-shrink-0"
+      className="animate-spin h-4 w-4 text-cream flex-shrink-0"
       xmlns="http://www.w3.org/2000/svg"
       fill="none"
       viewBox="0 0 24 24"
@@ -281,9 +281,9 @@ function MetricTile({
   href?: string
 }) {
   const content = (
-    <div className="rounded-lg bg-zinc-900 p-2 text-center">
-      <p className="text-xs text-zinc-500">{label}</p>
-      <p className="text-sm font-semibold text-zinc-200 mt-0.5">{value}</p>
+    <div className="rounded-lg bg-obsidian p-2 text-center">
+      <p className="text-xs text-ash">{label}</p>
+      <p className="text-sm font-semibold text-cream mt-0.5">{value}</p>
     </div>
   )
   return href ? <Link href={href}>{content}</Link> : content

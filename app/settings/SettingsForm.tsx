@@ -1,4 +1,4 @@
-'use client'
+﻿'use client'
 
 import { useState } from 'react'
 import { saveSettings } from './actions'
@@ -44,11 +44,11 @@ const META_FIELDS: FieldDef[] = [
 function InputField({ field, config }: { field: FieldDef; config: BreweryConfig | null }) {
   const value = config?.[field.name] ?? ''
   const baseClass =
-    'w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-white text-sm placeholder-zinc-500 focus:outline-none focus:ring-2 focus:ring-amber-500 focus:border-transparent'
+    'w-full bg-onyx border border-white/[0.08] rounded-lg px-3 py-2 text-white text-sm placeholder-smoke focus:outline-none focus:ring-2 focus:ring-cream/30 focus:border-transparent'
 
   return (
     <div>
-      <label className="block text-sm font-medium text-zinc-300 mb-1.5">{field.label}</label>
+      <label className="block text-sm font-medium text-bone mb-1.5">{field.label}</label>
       {field.textarea ? (
         <textarea
           name={field.name}
@@ -72,7 +72,7 @@ function InputField({ field, config }: { field: FieldDef; config: BreweryConfig 
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <section className="bg-zinc-900 border border-zinc-800 rounded-xl p-6 space-y-4">
+    <section className="bg-obsidian border border-white/[0.06] rounded-xl p-6 space-y-4">
       <h2 className="text-base font-semibold text-white">{title}</h2>
       {children}
     </section>
@@ -106,7 +106,7 @@ export default function SettingsForm({ config }: Props) {
       </Section>
 
       <Section title="AI API Keys">
-        <p className="text-xs text-zinc-500">
+        <p className="text-xs text-ash">
           Leave blank to use the shared environment defaults. Fill in to override with keys
           specific to this brewery account.
         </p>
@@ -116,7 +116,7 @@ export default function SettingsForm({ config }: Props) {
       </Section>
 
       <Section title="Meta / Instagram Credentials">
-        <p className="text-xs text-zinc-500">
+        <p className="text-xs text-ash">
           Required for publishing posts to Instagram and Facebook.
         </p>
         {META_FIELDS.map((f) => (
@@ -128,7 +128,7 @@ export default function SettingsForm({ config }: Props) {
         <button
           type="submit"
           disabled={status === 'saving'}
-          className="bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-zinc-900 font-semibold rounded-lg px-5 py-2.5 text-sm transition-colors"
+          className="bg-cream hover:bg-bone disabled:opacity-50 text-cream font-semibold rounded-lg px-5 py-2.5 text-sm transition-colors"
         >
           {status === 'saving' ? 'Saving…' : 'Save settings'}
         </button>

@@ -1,4 +1,4 @@
-'use client'
+﻿'use client'
 
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
@@ -85,10 +85,10 @@ function Toast({
   }, [onClose])
 
   return (
-    <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 rounded-xl border border-zinc-700 bg-zinc-900 px-5 py-3 shadow-xl text-sm text-zinc-100">
-      <span className="text-green-400">✓</span>
+    <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 rounded-xl border border-white/[0.08] bg-obsidian px-5 py-3 shadow-2xl shadow-black/40 text-sm text-cream">
+      <span className="text-emerald">✓</span>
       {message}
-      <button onClick={onClose} className="ml-2 text-zinc-500 hover:text-zinc-300">✕</button>
+      <button onClick={onClose} className="ml-2 text-ash hover:text-bone">✕</button>
     </div>
   )
 }
@@ -133,12 +133,12 @@ function PhotoCard({
   }
 
   return (
-    <div className="flex flex-col rounded-2xl border border-zinc-800 bg-zinc-900 overflow-hidden">
+    <div className="flex flex-col rounded-2xl border border-white/[0.06] bg-obsidian overflow-hidden">
       {/* Canvas preview */}
-      <div className="relative w-full aspect-square bg-zinc-800">
+      <div className="relative w-full aspect-square bg-onyx">
         {!imgLoaded && (
           <div className="absolute inset-0 flex items-center justify-center">
-            <span className="text-zinc-500 text-xs">Loading…</span>
+            <span className="text-ash text-xs">Loading…</span>
           </div>
         )}
         <canvas
@@ -150,11 +150,11 @@ function PhotoCard({
       <div className="flex flex-col gap-3 p-4">
         {/* Filter picker */}
         <div>
-          <label className="text-xs text-zinc-500 uppercase tracking-wider mb-1 block">Filter</label>
+          <label className="text-xs text-ash uppercase tracking-wider mb-1 block">Filter</label>
           <select
             value={draft.filter}
             onChange={(e) => onChange({ filter: e.target.value as FilterName })}
-            className="w-full rounded-lg bg-zinc-800 border border-zinc-700 text-zinc-200 text-sm px-3 py-1.5 focus:outline-none focus:border-amber-500"
+            className="w-full rounded-lg bg-onyx border border-white/[0.08] text-cream text-sm px-3 py-1.5 focus:outline-none focus:border-cream/30"
           >
             {(Object.keys(FILTERS) as FilterName[]).map((f) => (
               <option key={f} value={f}>{FILTERS[f].label}</option>
@@ -164,23 +164,23 @@ function PhotoCard({
 
         {/* Caption */}
         <div>
-          <label className="text-xs text-zinc-500 uppercase tracking-wider mb-1 block">Caption</label>
+          <label className="text-xs text-ash uppercase tracking-wider mb-1 block">Caption</label>
           <textarea
             value={draft.caption}
             onChange={(e) => onChange({ caption: e.target.value })}
             rows={4}
-            className="w-full rounded-lg bg-zinc-800 border border-zinc-700 text-zinc-200 text-sm px-3 py-2 resize-none focus:outline-none focus:border-amber-500 leading-relaxed"
+            className="w-full rounded-lg bg-onyx border border-white/[0.08] text-cream text-sm px-3 py-2 resize-none focus:outline-none focus:border-cream/30 leading-relaxed"
           />
         </div>
 
         {/* Hashtags */}
         <div>
-          <label className="text-xs text-zinc-500 uppercase tracking-wider mb-1.5 block">Hashtags</label>
+          <label className="text-xs text-ash uppercase tracking-wider mb-1.5 block">Hashtags</label>
           <div className="flex flex-wrap gap-1.5">
             {draft.hashtags.map((tag) => (
               <span
                 key={tag}
-                className="inline-block rounded-full bg-zinc-800 border border-zinc-700 px-2.5 py-0.5 text-xs text-amber-400"
+                className="inline-block rounded-full bg-onyx border border-white/[0.08] px-2.5 py-0.5 text-xs text-cream"
               >
                 #{tag}
               </span>
@@ -190,7 +190,7 @@ function PhotoCard({
 
         {/* Platform toggles */}
         <div>
-          <label className="text-xs text-zinc-500 uppercase tracking-wider mb-1.5 block">Platforms</label>
+          <label className="text-xs text-ash uppercase tracking-wider mb-1.5 block">Platforms</label>
           <div className="flex gap-2">
             {(['instagram', 'facebook'] as const).map((p) => (
               <button
@@ -198,8 +198,8 @@ function PhotoCard({
                 onClick={() => togglePlatform(p)}
                 className={`flex-1 rounded-lg border text-xs py-1.5 capitalize transition-colors ${
                   draft.platforms.includes(p)
-                    ? 'border-amber-500 bg-amber-500/10 text-amber-400'
-                    : 'border-zinc-700 bg-zinc-800 text-zinc-500 hover:text-zinc-300'
+                    ? 'border-cream/30 bg-cream/10 text-cream'
+                    : 'border-white/[0.08] bg-onyx text-ash hover:text-bone'
                 }`}
               >
                 {p}
@@ -225,7 +225,7 @@ function ProgressStep({
 }) {
   return (
     <div className={`flex items-center gap-2 text-sm transition-colors ${
-      done ? 'text-green-400' : active ? 'text-amber-400' : 'text-zinc-600'
+      done ? 'text-emerald' : active ? 'text-cream' : 'text-smoke'
     }`}>
       <span className="w-4 text-center">
         {done ? '✓' : active ? '⟳' : '○'}
@@ -544,7 +544,7 @@ export default function UploadPage() {
   // ─── Render ──────────────────────────────────────────────────────────────────
 
   return (
-    <div className="min-h-screen flex flex-col bg-zinc-950 text-zinc-100">
+    <div className="min-h-screen flex flex-col bg-ink text-cream">
       {/* Hidden off-screen canvas for filter rendering */}
       <canvas
         ref={canvasWorkRef}
@@ -559,24 +559,24 @@ export default function UploadPage() {
         {phase === 'setup' && (
           <div className="flex flex-col gap-8">
             <div>
-              <h1 className="text-2xl font-bold text-zinc-100">Quick Post Generator</h1>
-              <p className="text-zinc-400 text-sm mt-1">
+              <h1 className="text-2xl font-bold text-cream">Quick Post Generator</h1>
+              <p className="text-ash text-sm mt-1">
                 Let BrewCast pick the best photos for you, or hand-pick the ones you want.
               </p>
             </div>
 
             {/* Mode toggle */}
-            <div className="grid grid-cols-2 gap-2 rounded-2xl border border-zinc-800 bg-zinc-900 p-1.5">
+            <div className="grid grid-cols-2 gap-2 rounded-2xl border border-white/[0.06] bg-obsidian p-1.5">
               <button
                 onClick={() => switchMode('auto')}
                 className={`px-4 py-3 rounded-xl text-sm font-medium transition-colors text-left ${
                   mode === 'auto'
-                    ? 'bg-amber-500 text-zinc-950'
-                    : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800'
+                    ? 'bg-cream text-ink'
+                    : 'text-ash hover:text-cream hover:bg-onyx'
                 }`}
               >
                 <div className="font-semibold">Let BrewCast pick the best fit</div>
-                <div className={`text-xs mt-0.5 ${mode === 'auto' ? 'text-zinc-900' : 'text-zinc-500'}`}>
+                <div className={`text-xs mt-0.5 ${mode === 'auto' ? 'text-cream' : 'text-ash'}`}>
                   Choose how many posts to be drafted
                 </div>
               </button>
@@ -584,12 +584,12 @@ export default function UploadPage() {
                 onClick={() => switchMode('manual')}
                 className={`px-4 py-3 rounded-xl text-sm font-medium transition-colors text-left ${
                   mode === 'manual'
-                    ? 'bg-amber-500 text-zinc-950'
-                    : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800'
+                    ? 'bg-cream text-ink'
+                    : 'text-ash hover:text-cream hover:bg-onyx'
                 }`}
               >
                 <div className="font-semibold">I&apos;ll pick the photos myself</div>
-                <div className={`text-xs mt-0.5 ${mode === 'manual' ? 'text-zinc-900' : 'text-zinc-500'}`}>
+                <div className={`text-xs mt-0.5 ${mode === 'manual' ? 'text-cream' : 'text-ash'}`}>
                   Multi-select up to 10 photos from the library
                 </div>
               </button>
@@ -598,10 +598,10 @@ export default function UploadPage() {
             {/* Photo library */}
             <div>
               <div className="flex items-baseline justify-between mb-3">
-                <h2 className="text-sm font-semibold text-zinc-300 uppercase tracking-wider">
+                <h2 className="text-sm font-semibold text-bone uppercase tracking-wider">
                   Photo Library
                   {!photosLoading && photos.length > 0 && (
-                    <span className="ml-2 text-zinc-500 font-normal normal-case">
+                    <span className="ml-2 text-ash font-normal normal-case">
                       ({photos.length} photos)
                     </span>
                   )}
@@ -609,7 +609,7 @@ export default function UploadPage() {
                 {mode === 'manual' && selectedNames.size > 0 && (
                   <button
                     onClick={() => setSelectedNames(new Set())}
-                    className="text-xs text-zinc-500 hover:text-zinc-300 transition-colors"
+                    className="text-xs text-ash hover:text-bone transition-colors"
                   >
                     Clear selection ({selectedNames.size})
                   </button>
@@ -617,23 +617,23 @@ export default function UploadPage() {
               </div>
 
               {photosLoading && (
-                <div className="flex items-center gap-2 text-zinc-500 text-sm">
+                <div className="flex items-center gap-2 text-ash text-sm">
                   <span className="animate-spin">⟳</span> Loading photos…
                 </div>
               )}
 
               {photosError && (
-                <div className="rounded-xl border border-red-800 bg-red-950 px-4 py-3 text-sm text-red-300">
+                <div className="rounded-xl border border-red-900/50 bg-red-950/40 px-4 py-3 text-sm text-red-300">
                   Could not load photo library: {photosError}
                 </div>
               )}
 
               {!photosLoading && photos.length === 0 && !photosError && (
-                <div className="rounded-xl border border-zinc-800 bg-zinc-900 px-5 py-8 text-center">
-                  <p className="text-zinc-500 text-sm">No photos found in the brewery-photos bucket.</p>
-                  <p className="text-zinc-600 text-xs mt-1">
-                    Upload photos to the <code className="text-amber-400">brewery-photos</code> Supabase Storage bucket
-                    or add them to <code className="text-amber-400">public/brewery-photos/</code>.
+                <div className="rounded-xl border border-white/[0.06] bg-obsidian px-5 py-8 text-center">
+                  <p className="text-ash text-sm">No photos found in the brewery-photos bucket.</p>
+                  <p className="text-smoke text-xs mt-1">
+                    Upload photos to the <code className="text-cream">brewery-photos</code> Supabase Storage bucket
+                    or add them to <code className="text-cream">public/brewery-photos/</code>.
                   </p>
                 </div>
               )}
@@ -653,8 +653,8 @@ export default function UploadPage() {
                         disabled={!interactive && !isSelected}
                         className={`group relative aspect-square w-full overflow-hidden rounded-lg border transition-all ${
                           isSelected
-                            ? 'border-amber-500 ring-2 ring-amber-500/40'
-                            : 'border-zinc-800 hover:border-zinc-600'
+                            ? 'border-cream/30 ring-2 ring-amber-500/40'
+                            : 'border-white/[0.06] hover:border-white/[0.10]'
                         } ${interactive ? 'cursor-pointer' : 'cursor-default'}`}
                         aria-pressed={interactive ? isSelected : undefined}
                       >
@@ -670,7 +670,7 @@ export default function UploadPage() {
                           <div
                             className={`absolute top-1.5 right-1.5 w-5 h-5 rounded-full border-2 flex items-center justify-center text-xs font-bold transition-all ${
                               isSelected
-                                ? 'border-amber-400 bg-amber-500 text-zinc-950'
+                                ? 'border-cream bg-cream text-ink'
                                 : 'border-white/60 bg-black/30 text-transparent group-hover:border-white'
                             }`}
                           >
@@ -686,12 +686,12 @@ export default function UploadPage() {
 
             {/* Action bar */}
             {mode === 'auto' ? (
-              <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-6 flex flex-col sm:flex-row items-start sm:items-center gap-6">
+              <div className="rounded-2xl border border-white/[0.06] bg-obsidian p-6 flex flex-col sm:flex-row items-start sm:items-center gap-6">
                 <div className="flex flex-col gap-1.5 flex-1">
-                  <label htmlFor="post-count" className="text-sm font-medium text-zinc-200">
+                  <label htmlFor="post-count" className="text-sm font-medium text-cream">
                     Let BrewCast pick the best fit — choose how many posts to be drafted
                   </label>
-                  <p className="text-xs text-zinc-500">
+                  <p className="text-xs text-ash">
                     AI will pick the best {postCount} photo{postCount !== 1 ? 's' : ''}, apply filters,
                     and write captions automatically.
                   </p>
@@ -708,26 +708,26 @@ export default function UploadPage() {
                       const v = Math.min(10, Math.max(1, parseInt(e.target.value) || 1))
                       setPostCount(v)
                     }}
-                    className="w-20 text-center rounded-xl border border-zinc-700 bg-zinc-800 text-zinc-100 text-xl font-bold py-2 focus:outline-none focus:border-amber-500"
+                    className="w-20 text-center rounded-xl border border-white/[0.08] bg-onyx text-cream text-xl font-bold py-2 focus:outline-none focus:border-cream/30"
                   />
                   <button
                     onClick={handleGenerate}
                     disabled={photos.length === 0 || photosLoading}
-                    className="px-6 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 disabled:opacity-40 disabled:cursor-not-allowed text-zinc-950 font-semibold text-sm transition-colors"
+                    className="px-6 py-2.5 rounded-xl bg-cream hover:bg-bone disabled:opacity-40 disabled:cursor-not-allowed text-ink font-semibold text-sm transition-colors"
                   >
                     Generate
                   </button>
                 </div>
               </div>
             ) : (
-              <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-6 flex flex-col sm:flex-row items-start sm:items-center gap-6">
+              <div className="rounded-2xl border border-white/[0.06] bg-obsidian p-6 flex flex-col sm:flex-row items-start sm:items-center gap-6">
                 <div className="flex flex-col gap-1.5 flex-1">
-                  <p className="text-sm font-medium text-zinc-200">
+                  <p className="text-sm font-medium text-cream">
                     {selectedNames.size === 0
                       ? 'Tap photos above to add them to your batch'
                       : `${selectedNames.size} photo${selectedNames.size !== 1 ? 's' : ''} selected`}
                   </p>
-                  <p className="text-xs text-zinc-500">
+                  <p className="text-xs text-ash">
                     BrewCast will analyse each selected photo, suggest a filter, and write a caption.
                     {selectedNames.size >= 10 && ' (Max 10 reached)'}
                   </p>
@@ -736,7 +736,7 @@ export default function UploadPage() {
                 <button
                   onClick={handleGenerate}
                   disabled={selectedNames.size === 0 || photosLoading}
-                  className="px-6 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 disabled:opacity-40 disabled:cursor-not-allowed text-zinc-950 font-semibold text-sm transition-colors"
+                  className="px-6 py-2.5 rounded-xl bg-cream hover:bg-bone disabled:opacity-40 disabled:cursor-not-allowed text-ink font-semibold text-sm transition-colors"
                 >
                   Generate {selectedNames.size > 0 && `(${selectedNames.size})`}
                 </button>
@@ -750,11 +750,11 @@ export default function UploadPage() {
           <div className="flex flex-col items-center justify-center min-h-[60vh] gap-8">
             <div className="text-center">
               <div className="text-4xl mb-4 animate-spin inline-block">⟳</div>
-              <h2 className="text-xl font-bold text-zinc-100">AI is working its magic…</h2>
-              <p className="text-zinc-500 text-sm mt-1">Analysing photos and writing captions</p>
+              <h2 className="text-xl font-bold text-cream">AI is working its magic…</h2>
+              <p className="text-ash text-sm mt-1">Analysing photos and writing captions</p>
             </div>
 
-            <div className="flex flex-col gap-2 rounded-2xl border border-zinc-800 bg-zinc-900 px-8 py-6 w-full max-w-sm">
+            <div className="flex flex-col gap-2 rounded-2xl border border-white/[0.06] bg-obsidian px-8 py-6 w-full max-w-sm">
               {progressSteps.map((step, i) => (
                 <ProgressStep
                   key={i}
@@ -772,22 +772,22 @@ export default function UploadPage() {
           <div className="flex flex-col gap-6">
             <div className="flex items-center justify-between">
               <div>
-                <h1 className="text-2xl font-bold text-zinc-100">Review Your Posts</h1>
-                <p className="text-zinc-400 text-sm mt-1">
+                <h1 className="text-2xl font-bold text-cream">Review Your Posts</h1>
+                <p className="text-ash text-sm mt-1">
                   Edit captions, swap filters, or toggle platforms before saving.
                 </p>
               </div>
               <div className="flex items-center gap-3">
                 <button
                   onClick={() => setPhase('setup')}
-                  className="px-4 py-2 rounded-lg border border-zinc-700 text-zinc-400 hover:text-zinc-200 hover:border-zinc-600 text-sm transition-colors"
+                  className="px-4 py-2 rounded-lg border border-white/[0.08] text-ash hover:text-cream hover:border-white/[0.10] text-sm transition-colors"
                 >
                   ← Start over
                 </button>
                 <button
                   onClick={handleSaveAll}
                   disabled={saving}
-                  className="px-5 py-2 rounded-lg bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-zinc-950 font-semibold text-sm transition-colors"
+                  className="px-5 py-2 rounded-lg bg-cream hover:bg-bone disabled:opacity-50 text-ink font-semibold text-sm transition-colors"
                 >
                   {saving ? 'Saving…' : `Save All to Drafts (${drafts.length})`}
                 </button>
@@ -808,7 +808,7 @@ export default function UploadPage() {
               <button
                 onClick={handleSaveAll}
                 disabled={saving}
-                className="px-6 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-zinc-950 font-semibold text-sm transition-colors"
+                className="px-6 py-2.5 rounded-xl bg-cream hover:bg-bone disabled:opacity-50 text-ink font-semibold text-sm transition-colors"
               >
                 {saving ? 'Saving…' : `Save All to Drafts (${drafts.length})`}
               </button>

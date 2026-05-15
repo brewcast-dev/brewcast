@@ -117,35 +117,37 @@ export default async function DraftsPage({
 
   return (
     <div className="min-h-screen flex flex-col">
-      <main className="flex-1 max-w-5xl mx-auto w-full px-6 py-8">
-        <div className="flex items-center justify-between mb-6">
-          <h1 className="text-2xl font-bold text-zinc-100">Drafts</h1>
+      <main className="flex-1 max-w-6xl mx-auto w-full px-6 pt-28 pb-16">
+        <div className="flex items-end justify-between mb-10 gap-4 flex-wrap">
+          <div>
+            <h1 className="font-display text-5xl md:text-6xl text-cream tracking-tight">Drafts</h1>
+            <p className="text-ash text-sm mt-2">Review, schedule, and publish your queue.</p>
+          </div>
           <div className="flex gap-2">
             <Link
               href="/upload"
-              className="px-4 py-2 rounded-lg bg-amber-500 hover:bg-amber-400 text-zinc-950 text-sm font-medium transition-colors"
+              className="px-5 py-2.5 rounded-full bg-cream text-ink text-sm font-medium hover:bg-bone transition-colors"
             >
-              + Quick generate
+              Quick generate
             </Link>
             <Link
               href="/chat"
-              className="px-4 py-2 rounded-lg border border-zinc-700 text-zinc-300 hover:bg-zinc-800 text-sm font-medium transition-colors"
+              className="px-5 py-2.5 rounded-full hairline text-cream text-sm hover:bg-white/[0.04] transition-colors"
             >
-              + New via chat
+              New via chat
             </Link>
           </div>
         </div>
 
-        {/* Status tabs */}
-        <div className="flex gap-1 border-b border-zinc-800 mb-6">
+        <div className="flex gap-1 border-b border-white/[0.06] mb-8 overflow-x-auto scrollbar-thin">
           {STATUS_TABS.map(({ label, value }) => (
             <Link
               key={value}
               href={value === 'all' ? '/drafts' : `/drafts?status=${value}`}
-              className={`px-4 py-2 text-sm border-b-2 -mb-px transition-colors ${
+              className={`px-4 py-3 text-sm border-b-2 -mb-px transition-colors whitespace-nowrap ${
                 activeStatus === value
-                  ? 'border-amber-400 text-amber-400'
-                  : 'border-transparent text-zinc-400 hover:text-zinc-200'
+                  ? 'border-cream text-cream'
+                  : 'border-transparent text-ash hover:text-cream'
               }`}
             >
               {label}
@@ -154,20 +156,20 @@ export default async function DraftsPage({
         </div>
 
         {loadError && (
-          <div className="rounded-xl border border-red-800 bg-red-950 px-4 py-3 text-sm text-red-300 mb-6">
+          <div className="rounded-2xl border border-red-900/50 bg-red-950/30 px-4 py-3 text-sm text-red-300 mb-6">
             Failed to load: {(loadError as { message: string }).message}
           </div>
         )}
 
         {allItems.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-24 gap-3">
-            <p className="text-zinc-500 text-sm">No posts here yet.</p>
-            <Link href="/upload" className="text-amber-400 text-sm hover:underline">
+          <div className="flex flex-col items-center justify-center py-32 gap-3">
+            <p className="text-ash text-sm font-display italic text-lg">Nothing here yet.</p>
+            <Link href="/upload" className="text-cream text-sm hover:text-bone transition-colors">
               Try /upload to generate posts →
             </Link>
           </div>
         ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
             {allItems.map((item) => (
               <DraftCard key={`${item.source}_${item.id}`} item={item} />
             ))}

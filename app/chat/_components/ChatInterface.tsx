@@ -1,4 +1,4 @@
-'use client'
+﻿'use client'
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useChat } from '@ai-sdk/react'
@@ -86,11 +86,11 @@ export default function ChatInterface() {
   return (
     <div className="flex flex-col h-screen overflow-hidden">
       {/* Page header — global nav lives in the root layout */}
-      <header className="flex items-center justify-end px-6 py-2 border-b border-zinc-800 flex-shrink-0">
+      <header className="flex items-center justify-end px-6 py-2 border-b border-white/[0.06] flex-shrink-0">
         <button
           onClick={handleClear}
           disabled={messages.length === 0 && !isStreaming}
-          className="px-3 py-1.5 rounded-lg text-xs text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+          className="px-3 py-1.5 rounded-lg text-xs text-ash hover:bg-onyx hover:text-bone disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
         >
           Clear chat
         </button>
@@ -115,13 +115,13 @@ export default function ChatInterface() {
           {/* Typing indicator — three bouncing dots while waiting for first token */}
           {status === 'submitted' && (
             <div className="flex gap-3 justify-start">
-              <div className="w-7 h-7 rounded-full bg-amber-500 flex items-center justify-center flex-shrink-0">
-                <span className="text-xs font-bold text-zinc-950">B</span>
+              <div className="w-7 h-7 rounded-full bg-cream flex items-center justify-center flex-shrink-0">
+                <span className="text-xs font-bold text-ink">B</span>
               </div>
-              <div className="rounded-2xl rounded-tl-sm bg-zinc-800 px-4 py-3 flex items-center gap-1.5">
-                <span className="w-1.5 h-1.5 rounded-full bg-zinc-400 animate-bounce [animation-delay:0ms]" />
-                <span className="w-1.5 h-1.5 rounded-full bg-zinc-400 animate-bounce [animation-delay:150ms]" />
-                <span className="w-1.5 h-1.5 rounded-full bg-zinc-400 animate-bounce [animation-delay:300ms]" />
+              <div className="rounded-2xl rounded-tl-sm bg-onyx px-4 py-3 flex items-center gap-1.5">
+                <span className="w-1.5 h-1.5 rounded-full bg-ash animate-bounce [animation-delay:0ms]" />
+                <span className="w-1.5 h-1.5 rounded-full bg-ash animate-bounce [animation-delay:150ms]" />
+                <span className="w-1.5 h-1.5 rounded-full bg-ash animate-bounce [animation-delay:300ms]" />
               </div>
             </div>
           )}
@@ -132,7 +132,7 @@ export default function ChatInterface() {
 
       {status === 'error' && (
         <div className="max-w-3xl mx-auto w-full px-6 mb-3">
-          <div className="rounded-xl border border-red-800 bg-red-950 px-4 py-3 text-sm text-red-300">
+          <div className="rounded-xl border border-red-900/50 bg-red-950/40 px-4 py-3 text-sm text-red-300">
             Something went wrong — please try again.
           </div>
         </div>
@@ -163,8 +163,8 @@ function EmptyState({ onPrompt }: { onPrompt: (text: string) => void }) {
   return (
     <div className="flex flex-col items-center justify-center h-full gap-8 py-16">
       <div className="text-center space-y-2">
-        <h2 className="text-3xl font-bold text-amber-400">Good day, brewer! 👋</h2>
-        <p className="text-zinc-400 max-w-md">
+        <h2 className="text-3xl font-bold text-cream">Good day, brewer! 👋</h2>
+        <p className="text-ash max-w-md">
           I&apos;m BrewCast, your AI social media manager. What would you like to create today?
         </p>
       </div>
@@ -173,7 +173,7 @@ function EmptyState({ onPrompt }: { onPrompt: (text: string) => void }) {
           <button
             key={prompt}
             onClick={() => onPrompt(prompt)}
-            className="text-left rounded-xl border border-zinc-700 bg-zinc-800 hover:border-zinc-600 px-4 py-3 text-sm text-zinc-300 transition-colors"
+            className="text-left rounded-xl border border-white/[0.08] bg-onyx hover:border-white/[0.10] px-4 py-3 text-sm text-bone transition-colors"
           >
             {prompt}
           </button>
