@@ -3,6 +3,7 @@ import { createSessionClient } from '@/lib/supabase-server'
 import { createAdminClient } from '@/lib/supabase'
 import AddUserForm from './AddUserForm'
 import UserRow from './UserRow'
+import ProcessQueueButton from './ProcessQueueButton'
 
 interface AllowedUser {
   id: string
@@ -44,6 +45,8 @@ export default async function AdminUsersPage() {
           Control which emails can sign in to BrewCast. Each user gets their own API key config via Settings.
         </p>
       </div>
+
+      <ProcessQueueButton />
 
       <AddUserForm />
 

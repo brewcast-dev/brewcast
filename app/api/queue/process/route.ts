@@ -2,9 +2,23 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase'
 import { getBoss, PUBLISH_QUEUE, type PublishJobData } from '@/lib/queue'
 import { publishPost } from '@/lib/publish'
+import { getMetaCredentialsForUser } from '@/lib/get-user-config'
 
 // Allow up to 60 s — reels need polling for Meta transcoding
 export const maxDuration = 60
+
+type SupabaseClient = ReturnType<typeof createAdminClient>
+
+async function publishWithOwnerCredentials(supabase: SupabaseClient, postId: string) {
+  const { data: postRow } = await supabase
+    .from('posts')
+    .select('user_id')
+    .eq('id', postId)
+    .maybeSingle()
+  const userId = (postRow as { user_id: string | null } | null)?.user_id ?? null
+  const credentials = await getMetaCredentialsForUser(userId)
+  await publishPost(supabase, postId, { credentials })
+}
 
 export async function GET(req: NextRequest) {
   // ── Auth ──────────────────────────────────────────────────────────────────
@@ -23,7 +37,7 @@ export async function GET(req: NextRequest) {
     const jobs = await boss.fetch<PublishJobData>(PUBLISH_QUEUE, { batchSize: 100 })
     for (const job of jobs) {
       try {
-        await publishPost(supabase, job.data.post_id)
+        await publishWithOwnerCredentials(supabase, job.data.post_id)
         await boss.complete(PUBLISH_QUEUE, job.id)
         results.processed++
       } catch (err) {
@@ -42,18 +56,19 @@ export async function GET(req: NextRequest) {
   // posts already published by path 1 are skipped automatically.
   const { data: duePosts } = await supabase
     .from('posts')
-    .select('id')
+    .select('id, user_id')
     .eq('status', 'queued')
     .is('archived_at', null) // skip archived rows
     .lte('scheduled_at', new Date().toISOString())
 
-  for (const { id } of duePosts ?? []) {
+  for (const row of (duePosts ?? []) as Array<{ id: string; user_id: string | null }>) {
     try {
-      await publishPost(supabase, id)
+      const credentials = await getMetaCredentialsForUser(row.user_id)
+      await publishPost(supabase, row.id, { credentials })
       results.processed++
     } catch (err) {
       // publishPost already set status = 'failed' in the DB
-      console.error(`[queue] failed to publish post ${id}:`, (err as Error).message)
+      console.error(`[queue] failed to publish post ${row.id}:`, (err as Error).message)
       results.failed++
     }
   }

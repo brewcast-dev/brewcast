@@ -7,10 +7,15 @@ import { revalidatePath } from 'next/cache'
 import { enqueuePublish } from '@/lib/queue'
 import { publishPost as publishPostToMeta } from '@/lib/publish'
 
-async function getMetaCredentials() {
+async function getCurrentUser() {
   const client = createSessionClient()
   const { data: { user } } = await client.auth.getUser()
   if (!user) throw new Error('Not authenticated')
+  return user
+}
+
+async function getMetaCredentials() {
+  const user = await getCurrentUser()
   const rawConfig = await getUserConfig(user.id)
   const config = resolveConfig(rawConfig)
   return {
@@ -124,6 +129,7 @@ export async function approveUploadDraft(id: string) {
 
 export async function queueUploadDraft(id: string, scheduledAt: string) {
   const supabase = createAdminClient()
+  const user = await getCurrentUser()
 
   // 1. Fetch the draft
   const { data: draftData, error: fetchErr } = await supabase
@@ -142,6 +148,7 @@ export async function queueUploadDraft(id: string, scheduledAt: string) {
     .from('posts')
     .insert({
       status: 'queued',
+      user_id: user.id,
       platform: platformsToColumn(draft.platforms ?? ['instagram']),
       content_type: 'post',
       caption: captionWithHashtags(draft.caption, draft.hashtags ?? []),
@@ -206,6 +213,7 @@ export async function purgeUploadDraft(id: string) {
  */
 export async function publishUploadDraftNow(id: string): Promise<{ postId: string }> {
   const supabase = createAdminClient()
+  const user = await getCurrentUser()
 
   // 1. Fetch the draft
   const { data: draftData, error: fetchErr } = await supabase
@@ -223,6 +231,7 @@ export async function publishUploadDraftNow(id: string): Promise<{ postId: strin
     .from('posts')
     .insert({
       status: 'queued',
+      user_id: user.id,
       platform: platformsToColumn(draft.platforms ?? ['instagram']),
       content_type: 'post',
       caption: captionWithHashtags(draft.caption, draft.hashtags ?? []),

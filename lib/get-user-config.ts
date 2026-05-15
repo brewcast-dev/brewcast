@@ -53,3 +53,18 @@ export function resolveConfig(config: BreweryConfig | null): ResolvedConfig {
     metaFbPageId: config?.meta_fb_page_id ?? process.env.META_FB_PAGE_ID ?? null,
   }
 }
+
+/**
+ * Resolve Meta credentials for a specific user (or env-var defaults if no user).
+ * Used by the cron processor where no session is available — it reads the owner
+ * from posts.user_id and looks up that brewery's credentials.
+ */
+export async function getMetaCredentialsForUser(userId: string | null) {
+  const config = userId ? await getUserConfig(userId) : null
+  const resolved = resolveConfig(config)
+  return {
+    igUserId: resolved.metaIgUserId,
+    accessToken: resolved.metaAccessToken,
+    fbPageId: resolved.metaFbPageId,
+  }
+}

@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { revalidatePath } from 'next/cache'
 import { createAdminClient } from '@/lib/supabase'
+import { createSessionClient } from '@/lib/supabase-server'
 
 export interface DraftInsert {
   brewery_id?: string
@@ -14,6 +15,10 @@ export interface DraftInsert {
 }
 
 export async function POST(req: Request) {
+  const sessionClient = createSessionClient()
+  const { data: { user } } = await sessionClient.auth.getUser()
+  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+
   let body: { drafts: DraftInsert[] }
   try {
     body = await req.json()
@@ -28,6 +33,7 @@ export async function POST(req: Request) {
 
   const rows = drafts.map((d) => ({
     brewery_id: d.brewery_id ?? 'district6',
+    user_id: user.id,
     image_url: d.image_url,
     edited_image_url: d.edited_image_url ?? null,
     filter_applied: d.filter_applied,

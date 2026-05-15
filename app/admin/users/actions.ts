@@ -58,3 +58,43 @@ export async function toggleAdmin(id: string, isAdmin: boolean): Promise<{ error
   revalidatePath('/admin/users')
   return {}
 }
+
+/**
+ * Manually trigger the scheduled-publish processor. Useful when the GitHub
+ * Actions cron is delayed or paused, or for local development where there is
+ * no cron at all. Calls the same /api/queue/process endpoint the cron uses.
+ */
+export async function processQueueNow(): Promise<{
+  ok?: boolean
+  processed?: number
+  failed?: number
+  purged?: number
+  error?: string
+}> {
+  await requireAdmin()
+
+  const secret = process.env.QUEUE_SECRET
+  if (!secret) return { error: 'QUEUE_SECRET not set in environment' }
+
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000'
+
+  try {
+    const res = await fetch(`${appUrl}/api/queue/process`, {
+      headers: { Authorization: `Bearer ${secret}` },
+      cache: 'no-store',
+    })
+    const json = (await res.json().catch(() => ({}))) as Record<string, unknown>
+    if (!res.ok) {
+      return { error: `Queue processor returned ${res.status}: ${JSON.stringify(json)}` }
+    }
+    revalidatePath('/drafts')
+    return {
+      ok: true,
+      processed: (json.processed as number) ?? 0,
+      failed: (json.failed as number) ?? 0,
+      purged: (json.purged as number) ?? 0,
+    }
+  } catch (err) {
+    return { error: (err as Error).message }
+  }
+}

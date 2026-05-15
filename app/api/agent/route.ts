@@ -156,7 +156,7 @@ export async function POST(req: Request) {
     system: systemPrompt,
     messages: modelMessages,
     stopWhen: stepCountIs(10),
-    tools: buildTools({ supabase, brewery, breweryName, igHandle, tone, config, googleProvider }),
+    tools: buildTools({ supabase, brewery, breweryName, igHandle, tone, config, googleProvider, userId: user.id }),
   })
 
   return result.toUIMessageStreamResponse()
@@ -229,8 +229,9 @@ function buildTools(ctx: {
   config: ResolvedConfig
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   googleProvider: any
+  userId: string
 }) {
-  const { supabase, config, googleProvider } = ctx
+  const { supabase, config, googleProvider, userId } = ctx
 
   return {
     // ── 1. get_brewery_profile ──────────────────────────────────────────────
@@ -645,6 +646,7 @@ function buildTools(ctx: {
           .from('posts')
           .insert({
             status: scheduled_at ? 'queued' : 'draft',
+            user_id: userId,
             content_type,
             platform,
             caption,
