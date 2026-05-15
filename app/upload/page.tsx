@@ -1,7 +1,6 @@
 'use client'
 
 import { useEffect, useRef, useState, useCallback } from 'react'
-import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import type { BreweryPhoto } from '@/app/api/upload/photos/route'
 import type { PhotoAnalysis } from '@/app/api/ai/analyze-photo/route'

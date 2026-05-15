@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useChat } from '@ai-sdk/react'
 import { DefaultChatTransport, type UIMessage } from 'ai'
-import Link from 'next/link'
 import MessageBubble from './MessageBubble'
 import InputBar from './InputBar'
 
