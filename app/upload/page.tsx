@@ -698,22 +698,33 @@ export default function UploadPage() {
                 </div>
 
                 <div className="flex items-center gap-3">
-                  <input
-                    id="post-count"
-                    type="number"
-                    min={1}
-                    max={10}
-                    value={postCount}
-                    onChange={(e) => {
-                      const v = Math.min(10, Math.max(1, parseInt(e.target.value) || 1))
-                      setPostCount(v)
-                    }}
-                    className="w-20 text-center rounded-xl border border-white/[0.08] bg-onyx text-cream text-xl font-bold py-2 focus:outline-none focus:border-cream/30"
-                  />
+                  <div className="flex items-center rounded-full hairline bg-onyx overflow-hidden">
+                    <button
+                      type="button"
+                      onClick={() => setPostCount(Math.max(1, postCount - 1))}
+                      disabled={postCount <= 1}
+                      aria-label="Decrease count"
+                      className="px-3.5 py-2 text-cream hover:bg-slate disabled:opacity-30 disabled:cursor-not-allowed transition-colors text-lg leading-none"
+                    >
+                      −
+                    </button>
+                    <div className="px-4 py-2 text-cream font-medium text-base min-w-[2.75rem] text-center tabular-nums">
+                      {postCount}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setPostCount(Math.min(10, postCount + 1))}
+                      disabled={postCount >= 10}
+                      aria-label="Increase count"
+                      className="px-3.5 py-2 text-cream hover:bg-slate disabled:opacity-30 disabled:cursor-not-allowed transition-colors text-lg leading-none"
+                    >
+                      +
+                    </button>
+                  </div>
                   <button
                     onClick={handleGenerate}
                     disabled={photos.length === 0 || photosLoading}
-                    className="px-6 py-2.5 rounded-xl bg-cream hover:bg-bone disabled:opacity-40 disabled:cursor-not-allowed text-ink font-semibold text-sm transition-colors"
+                    className="px-6 py-2.5 rounded-full bg-cream hover:bg-bone disabled:opacity-40 disabled:cursor-not-allowed text-ink font-medium text-sm transition-colors"
                   >
                     Generate
                   </button>
@@ -736,7 +747,7 @@ export default function UploadPage() {
                 <button
                   onClick={handleGenerate}
                   disabled={selectedNames.size === 0 || photosLoading}
-                  className="px-6 py-2.5 rounded-xl bg-cream hover:bg-bone disabled:opacity-40 disabled:cursor-not-allowed text-ink font-semibold text-sm transition-colors"
+                  className="px-6 py-2.5 rounded-full bg-cream hover:bg-bone disabled:opacity-40 disabled:cursor-not-allowed text-ink font-medium text-sm transition-colors"
                 >
                   Generate {selectedNames.size > 0 && `(${selectedNames.size})`}
                 </button>
