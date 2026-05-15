@@ -155,8 +155,13 @@ export async function queueUploadDraft(id: string, scheduledAt: string) {
 
   const newPostId = (postData as { id: string }).id
 
-  // 3. Mark the draft as queued (keep the row for audit; do not delete)
-  await supabase.from('drafts').update({ status: 'queued', scheduled_at: dt }).eq('id', id)
+  // 3. Archive the original draft row so it disappears from the default views
+  // but is preserved in the Archive tab for audit. The posts row is now the
+  // source of truth.
+  await supabase
+    .from('drafts')
+    .update({ status: 'queued', scheduled_at: dt, archived_at: new Date().toISOString() })
+    .eq('id', id)
 
   // 4. Enqueue via pg-boss (non-fatal — fallback queue/process route reads from posts)
   await enqueuePublish(newPostId, dt).catch((e: unknown) =>
@@ -231,15 +236,16 @@ export async function publishUploadDraftNow(id: string): Promise<{ postId: strin
 
   const newPostId = (postData as { id: string }).id
 
-  // 3. Mark the draft as queued (for audit)
-  await supabase.from('drafts').update({ status: 'queued' }).eq('id', id)
+  // 3. Archive the original draft row so the posts row is the only one visible
+  // in default views; the drafts row is preserved in the Archive tab for audit.
+  await supabase
+    .from('drafts')
+    .update({ status: 'published', archived_at: new Date().toISOString() })
+    .eq('id', id)
 
   // 4. Publish via Meta Graph API immediately
   const credentials = await getMetaCredentials()
   await publishPostToMeta(supabase, newPostId, { allowAnyStatus: true, credentials })
-
-  // 5. Mark the draft as published too
-  await supabase.from('drafts').update({ status: 'published' }).eq('id', id)
 
   revalidatePath('/drafts')
   revalidatePath(`/drafts/${id}`)

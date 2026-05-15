@@ -1,5 +1,6 @@
 import Link from 'next/link'
 import { createSessionClient } from '@/lib/supabase-server'
+import { createAdminClient } from '@/lib/supabase'
 import { signOut } from '@/app/login/actions'
 
 const NAV_LINKS = [
@@ -13,6 +14,14 @@ export default async function Nav() {
   const client = createSessionClient()
   const { data: { user } } = await client.auth.getUser()
   if (!user) return null
+
+  const admin = createAdminClient()
+  const { data: me } = await admin
+    .from('allowed_users')
+    .select('is_admin')
+    .eq('user_id', user.id)
+    .maybeSingle()
+  const isAdmin = (me as { is_admin: boolean } | null)?.is_admin === true
 
   return (
     <nav className="border-b border-zinc-800 bg-zinc-950 px-5 py-3 flex items-center justify-between">
@@ -35,9 +44,11 @@ export default async function Nav() {
         <Link href="/settings" className="text-zinc-400 hover:text-white text-sm transition-colors">
           Settings
         </Link>
-        <Link href="/admin/users" className="text-zinc-400 hover:text-white text-sm transition-colors">
-          Admin
-        </Link>
+        {isAdmin && (
+          <Link href="/admin/users" className="text-zinc-400 hover:text-white text-sm transition-colors">
+            Admin
+          </Link>
+        )}
         <span className="text-zinc-600 text-xs hidden sm:block">{user.email}</span>
         <form action={signOut}>
           <button

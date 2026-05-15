@@ -13,6 +13,9 @@ export async function getBoss(): Promise<InstanceType<typeof PgBoss>> {
 
   boss = new PgBoss(dbUrl)
   await boss.start()
+  // pg-boss v10+ requires queues to be created explicitly. Idempotent — safe
+  // to call on every cold start; existing queues are left untouched.
+  await boss.createQueue(PUBLISH_QUEUE)
   return boss
 }
 
