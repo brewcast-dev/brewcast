@@ -1,9 +1,24 @@
 'use server'
 
 import { createAdminClient } from '@/lib/supabase'
+import { createSessionClient } from '@/lib/supabase-server'
+import { getUserConfig, resolveConfig } from '@/lib/get-user-config'
 import { revalidatePath } from 'next/cache'
 import { enqueuePublish } from '@/lib/queue'
 import { publishPost as publishPostToMeta } from '@/lib/publish'
+
+async function getMetaCredentials() {
+  const client = createSessionClient()
+  const { data: { user } } = await client.auth.getUser()
+  if (!user) throw new Error('Not authenticated')
+  const rawConfig = await getUserConfig(user.id)
+  const config = resolveConfig(rawConfig)
+  return {
+    igUserId: config.metaIgUserId,
+    accessToken: config.metaAccessToken,
+    fbPageId: config.metaFbPageId,
+  }
+}
 
 export async function approvePost(id: string) {
   const supabase = createAdminClient()
@@ -66,7 +81,8 @@ export async function purgePost(id: string) {
 
 export async function publishPostNow(id: string) {
   const supabase = createAdminClient()
-  await publishPostToMeta(supabase, id, { allowAnyStatus: true })
+  const credentials = await getMetaCredentials()
+  await publishPostToMeta(supabase, id, { allowAnyStatus: true, credentials })
   revalidatePath('/drafts')
   revalidatePath(`/drafts/${id}`)
 }
@@ -219,7 +235,8 @@ export async function publishUploadDraftNow(id: string): Promise<{ postId: strin
   await supabase.from('drafts').update({ status: 'queued' }).eq('id', id)
 
   // 4. Publish via Meta Graph API immediately
-  await publishPostToMeta(supabase, newPostId, { allowAnyStatus: true })
+  const credentials = await getMetaCredentials()
+  await publishPostToMeta(supabase, newPostId, { allowAnyStatus: true, credentials })
 
   // 5. Mark the draft as published too
   await supabase.from('drafts').update({ status: 'published' }).eq('id', id)

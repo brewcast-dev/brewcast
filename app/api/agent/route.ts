@@ -9,11 +9,13 @@ import {
   type LanguageModelMiddleware,
   type UIMessage,
 } from 'ai'
-import { google } from '@ai-sdk/google'
-import { groq } from '@ai-sdk/groq'
-import { mistral } from '@ai-sdk/mistral'
+import { createGoogleGenerativeAI } from '@ai-sdk/google'
+import { createGroq } from '@ai-sdk/groq'
+import { createMistral } from '@ai-sdk/mistral'
 import { z } from 'zod'
 import { createAdminClient } from '@/lib/supabase'
+import { createSessionClient } from '@/lib/supabase-server'
+import { getUserConfig, resolveConfig, type ResolvedConfig } from '@/lib/get-user-config'
 import type { Brewery } from '@/types/database'
 import ffmpegPath from 'ffmpeg-static'
 import ffmpeg from 'fluent-ffmpeg'
@@ -22,14 +24,8 @@ import os from 'os'
 import path from 'path'
 import crypto from 'crypto'
 
-// ─── Gemini → Groq fallback on 429 / rate-limit ─────────────────────────────
+// ─── 429 / rate-limit detection ──────────────────────────────────────────────
 
-const fallbackModels = [
-  groq('llama-3.3-70b-versatile'),
-  mistral('mistral-small-latest'),
-]
-
-// Walk the full cause chain — AISDKError wraps the original HTTP error as .cause
 function is429(error: unknown): boolean {
   if (error == null || typeof error !== 'object') return false
   const e = error as Record<string, unknown>
@@ -39,12 +35,10 @@ function is429(error: unknown): boolean {
   return e.cause != null && is429(e.cause)
 }
 
-// Try each fallback model in order, logging and continuing on 429.
-async function tryFallbacksStream(
-  params: Parameters<(typeof fallbackModels)[0]['doStream']>[0],
-): Promise<Awaited<ReturnType<(typeof fallbackModels)[0]['doStream']>>> {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function tryFallbacksStream(params: any, fallbacks: any[]): Promise<any> {
   const cleanParams = { ...params, providerMetadata: undefined }
-  for (const model of fallbackModels) {
+  for (const model of fallbacks) {
     try {
       return await model.doStream(cleanParams)
     } catch (err) {
@@ -59,11 +53,10 @@ async function tryFallbacksStream(
   throw new Error('[BrewCast] All fallback models rate-limited (Groq + Mistral)')
 }
 
-async function tryFallbacksGenerate(
-  params: Parameters<(typeof fallbackModels)[0]['doGenerate']>[0],
-): Promise<Awaited<ReturnType<(typeof fallbackModels)[0]['doGenerate']>>> {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function tryFallbacksGenerate(params: any, fallbacks: any[]): Promise<any> {
   const cleanParams = { ...params, providerMetadata: undefined }
-  for (const model of fallbackModels) {
+  for (const model of fallbacks) {
     try {
       return await model.doGenerate(cleanParams)
     } catch (err) {
@@ -78,34 +71,51 @@ async function tryFallbacksGenerate(
   throw new Error('[BrewCast] All fallback models rate-limited (Groq + Mistral)')
 }
 
-const geminiWithFallbackMiddleware: LanguageModelMiddleware = {
-  specificationVersion: 'v3',
-
-  // If Gemini 429s on the initial connection, try Groq then Mistral in order.
-  wrapStream: async ({ doStream, params }) => {
-    try {
-      return await doStream()
-    } catch (err) {
-      if (!is429(err)) throw err
-      console.log('[BrewCast] Gemini 429 — trying fallback chain: Groq → Mistral')
-      return tryFallbacksStream(params)
-    }
-  },
-
-  wrapGenerate: async ({ doGenerate, params }) => {
-    try {
-      return await doGenerate()
-    } catch (err) {
-      if (!is429(err)) throw err
-      console.log('[BrewCast] Gemini 429 on generate — trying fallback chain: Groq → Mistral')
-      return tryFallbacksGenerate(params)
-    }
-  },
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function createFallbackMiddleware(fallbacks: any[]): LanguageModelMiddleware {
+  return {
+    specificationVersion: 'v3',
+    wrapStream: async ({ doStream, params }) => {
+      try {
+        return await doStream()
+      } catch (err) {
+        if (!is429(err)) throw err
+        console.log('[BrewCast] Gemini 429 — trying fallback chain: Groq → Mistral')
+        return tryFallbacksStream(params, fallbacks)
+      }
+    },
+    wrapGenerate: async ({ doGenerate, params }) => {
+      try {
+        return await doGenerate()
+      } catch (err) {
+        if (!is429(err)) throw err
+        console.log('[BrewCast] Gemini 429 on generate — trying fallback chain: Groq → Mistral')
+        return tryFallbacksGenerate(params, fallbacks)
+      }
+    },
+  }
 }
 
 // ─── Route handler ───────────────────────────────────────────────────────────
 
 export async function POST(req: Request) {
+  const sessionClient = createSessionClient()
+  const { data: { user } } = await sessionClient.auth.getUser()
+  if (!user) return new Response('Unauthorized', { status: 401 })
+
+  const rawConfig = await getUserConfig(user.id)
+  const config = resolveConfig(rawConfig)
+
+  // Per-user AI providers
+  const googleProvider = createGoogleGenerativeAI({ apiKey: config.googleApiKey })
+  const groqProvider = createGroq({ apiKey: config.groqApiKey })
+  const mistralProvider = createMistral({ apiKey: config.mistralApiKey })
+
+  const fallbackModels = [
+    groqProvider('llama-3.3-70b-versatile'),
+    mistralProvider('mistral-small-latest'),
+  ]
+
   const body = (await req.json()) as { messages: UIMessage[] }
 
   const supabase = createAdminClient()
@@ -114,7 +124,7 @@ export async function POST(req: Request) {
     .select('*')
     .single() as { data: Brewery | null }
 
-  const breweryName = brewery?.name ?? 'your brewery'
+  const breweryName = config.breweryName !== 'your brewery' ? config.breweryName : (brewery?.name ?? 'your brewery')
   const igHandle = brewery?.ig_handle ?? ''
   const tone = brewery?.tone_of_voice ?? 'friendly and knowledgeable about craft beer'
 
@@ -137,8 +147,8 @@ export async function POST(req: Request) {
   const modelMessages = await convertToModelMessages(body.messages)
 
   const model = wrapLanguageModel({
-    model: google('gemini-2.5-flash'),
-    middleware: geminiWithFallbackMiddleware,
+    model: googleProvider('gemini-2.5-flash'),
+    middleware: createFallbackMiddleware(fallbackModels),
   })
 
   const result = streamText({
@@ -146,7 +156,7 @@ export async function POST(req: Request) {
     system: systemPrompt,
     messages: modelMessages,
     stopWhen: stepCountIs(10),
-    tools: buildTools({ supabase, brewery, breweryName, igHandle, tone }),
+    tools: buildTools({ supabase, brewery, breweryName, igHandle, tone, config, googleProvider }),
   })
 
   return result.toUIMessageStreamResponse()
@@ -175,7 +185,6 @@ async function uploadToStorage(
   return supabase.storage.from('media').getPublicUrl(storagePath).data.publicUrl
 }
 
-// Calls a Hugging Face Inference API model and retries if it's loading (503)
 async function callHFModel(
   model: string,
   body: Record<string, unknown>,
@@ -217,8 +226,11 @@ function buildTools(ctx: {
   breweryName: string
   igHandle: string
   tone: string
+  config: ResolvedConfig
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  googleProvider: any
 }) {
-  const { supabase } = ctx
+  const { supabase, config, googleProvider } = ctx
 
   return {
     // ── 1. get_brewery_profile ──────────────────────────────────────────────
@@ -326,7 +338,7 @@ function buildTools(ctx: {
               : 'dual: one Instagram caption (max 2200 chars, up to 30 hashtags) and one Facebook caption (shorter, 1-3 hashtags)'
 
         const { text } = await generateText({
-          model: google('gemini-2.5-flash'),
+          model: googleProvider('gemini-2.5-flash'),
           system: `You write social media captions for ${ctx.breweryName}. Tone: ${ctx.tone}. IG handle: @${ctx.igHandle}.`,
           prompt: `Write a ${platformGuide} caption for this ${content_type}:\n${context}`,
         })
@@ -376,7 +388,6 @@ function buildTools(ctx: {
       }),
       execute: async ({ mood, duration_seconds }) => {
         try {
-          // MusicGen Small: ~50 tokens/s at 32kHz. Hard cap at 1500 tokens (~30s).
           const maxNewTokens = Math.min(Math.floor(duration_seconds * 50), 1500)
           const audioBuffer = await callHFModel('facebook/musicgen-small', {
             inputs: `${mood}, no vocals, instrumental background music`,
@@ -510,12 +521,11 @@ function buildTools(ctx: {
               .output(rawPath),
           )
 
-          // 6. Caption overlay — dark gradient bar at bottom 35% + white text
+          // 6. Caption overlay
           const captionPath = path.join(tmpDir, 'captioned.mp4')
-          // Escape single quotes and colons for the drawtext filter
           const escaped = caption_overlay
             .replace(/\\/g, '\\\\')
-            .replace(/'/g, "’")
+            .replace(/'/g, "'")
             .replace(/:/g, '\\:')
           await ffmpegRun(
             ffmpeg()
@@ -528,7 +538,7 @@ function buildTools(ctx: {
               .output(captionPath),
           )
 
-          // 7. Mix audio: voiceover (full vol) + music (20%)
+          // 7. Mix audio
           const finalPath = path.join(tmpDir, 'final.mp4')
           const hasVO = !!voiceover_url
           const hasMusic = !!music_url
@@ -694,13 +704,13 @@ function buildTools(ctx: {
         return {
           count: rows.length,
           posts: rows.map((r) => ({
-            id: r.id, // Local UUID — use this for publish_post
+            id: r.id,
             status: r.status,
             platform: r.platform,
             content_type: r.content_type,
             caption_preview: r.caption ? r.caption.slice(0, 100) + (r.caption.length > 100 ? '…' : '') : null,
             scheduled_at: r.scheduled_at,
-            already_published_meta_id: r.meta_post_id, // For reference only — never pass as post_id
+            already_published_meta_id: r.meta_post_id,
           })),
         }
       },
@@ -711,8 +721,7 @@ function buildTools(ctx: {
       description:
         'Manually trigger the queue processor to publish any posts that are queued and past their scheduled_at time. ' +
         'Use this when the user wants to "publish all queued posts now" — it is the safest way to bulk-publish ' +
-        'because it uses the same code path as the automated scheduler. ' +
-        'For local development this is the only way to flush the queue (the GitHub Actions cron only runs in production).',
+        'because it uses the same code path as the automated scheduler.',
       inputSchema: z.object({}),
       execute: async () => {
         const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000'
@@ -748,9 +757,9 @@ function buildTools(ctx: {
           ),
       }),
       execute: async ({ post_id }) => {
-        const igUserId = process.env.META_IG_USER_ID
-        const accessToken = process.env.META_ACCESS_TOKEN
-        if (!igUserId || !accessToken) return { error: 'Meta credentials not configured' }
+        const igUserId = config.metaIgUserId
+        const accessToken = config.metaAccessToken
+        if (!igUserId || !accessToken) return { error: 'Meta credentials not configured for this account' }
 
         const { data: post, error } = await supabase
           .from('posts')
@@ -766,14 +775,13 @@ function buildTools(ctx: {
           endpoint: string,
           params: Record<string, string>,
         ): Promise<Record<string, unknown>> {
-          const body = new URLSearchParams({ ...params, access_token: accessToken! })
+          const body = new URLSearchParams({ ...params, access_token: accessToken })
           const res = await fetch(`${GRAPH_BASE}${endpoint}`, { method: 'POST', body })
           const json = await res.json()
           if (!res.ok) throw new Error(`Meta API: ${JSON.stringify(json)}`)
           return json as Record<string, unknown>
         }
 
-        // Poll until the IG media container finishes transcoding
         async function pollContainer(containerId: string): Promise<void> {
           for (let i = 0; i < 24; i++) {
             const res = await fetch(
@@ -790,7 +798,6 @@ function buildTools(ctx: {
         try {
           const metaPostIds: string[] = []
 
-          // ── Instagram ──────────────────────────────────────────────────
           if (post.platform === 'instagram' || post.platform === 'both') {
             if (post.content_type === 'reel' && post.video_url) {
               const container = await graphPost(`/${igUserId}/media`, {
@@ -835,8 +842,7 @@ function buildTools(ctx: {
             }
           }
 
-          // ── Facebook (optional — only if META_FB_PAGE_ID is set) ───────
-          const fbPageId = process.env.META_FB_PAGE_ID
+          const fbPageId = config.metaFbPageId
           if (fbPageId && (post.platform === 'facebook' || post.platform === 'both')) {
             if (post.content_type === 'reel' && post.video_url) {
               const video = await graphPost(`/${fbPageId}/videos`, {
@@ -896,7 +902,7 @@ function buildTools(ctx: {
         if (error || !post) return { error: error?.message ?? 'Post not found' }
 
         const { object: targeting } = await generateObject({
-          model: google('gemini-2.5-flash'),
+          model: googleProvider('gemini-2.5-flash'),
           schema: z.object({
             age_range: z.object({
               min: z.number().min(18).max(65),
@@ -943,9 +949,9 @@ function buildTools(ctx: {
           .describe('Number of past days to fetch analytics for'),
       }),
       execute: async ({ days }) => {
-        const igUserId = process.env.META_IG_USER_ID
-        const accessToken = process.env.META_ACCESS_TOKEN
-        if (!igUserId || !accessToken) return { error: 'Meta credentials not configured' }
+        const igUserId = config.metaIgUserId
+        const accessToken = config.metaAccessToken
+        if (!igUserId || !accessToken) return { error: 'Meta credentials not configured for this account' }
 
         const GRAPH_BASE = 'https://graph.facebook.com/v19.0'
         const since = Math.floor(Date.now() / 1000) - days * 86400
@@ -990,7 +996,6 @@ function buildTools(ctx: {
             totalReach += reach
             totalEngagements += likes + comments + shares + saves
 
-            // Find the matching post in our DB
             const { data: dbPost } = await supabase
               .from('posts')
               .select('id')

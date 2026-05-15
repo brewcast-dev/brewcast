@@ -35,7 +35,10 @@
       "Bash(git -C \"C:\\\\Users\\\\Lenovo\\\\brewcast\" status -sb)",
       "Bash(git -C \"C:\\\\Users\\\\Lenovo\\\\brewcast\" remote -v)",
       "Bash(git -C \"C:\\\\Users\\\\Lenovo\\\\brewcast\" log --oneline origin/main..main)",
-      "Bash(git -C \"C:\\\\Users\\\\Lenovo\\\\brewcast\" push origin main)"
+      "Bash(git -C \"C:\\\\Users\\\\Lenovo\\\\brewcast\" push origin main)",
+      "Bash(Get-ChildItem -Path \"C:\\\\Users\\\\Lenovo\\\\brewcast\\\\.claude\\\\worktrees\\\\happy-lamarr-8a5c33\" -Force)",
+      "Bash(Select-Object Name)",
+      "Bash(npm install *)"
     ]
   }
 }

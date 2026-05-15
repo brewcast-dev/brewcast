@@ -5,22 +5,30 @@ const GRAPH_BASE = 'https://graph.instagram.com/v21.0'
 
 type SupabaseClient = ReturnType<typeof createAdminClient>
 
-async function graphPost(
-  endpoint: string,
-  params: Record<string, string>,
-): Promise<Record<string, unknown>> {
-  const body = new URLSearchParams({ ...params, access_token: process.env.META_ACCESS_TOKEN! })
-  const res = await fetch(`${GRAPH_BASE}${endpoint}`, { method: 'POST', body })
-  const json = await res.json()
-  console.error(`[Meta API] ${endpoint}`, res.status, JSON.stringify(json))
-  if (!res.ok) throw new Error(`Meta API: ${JSON.stringify(json)}`)
-  return json as Record<string, unknown>
+export interface PublishCredentials {
+  igUserId: string
+  accessToken: string
+  fbPageId?: string | null
 }
 
-async function pollContainer(containerId: string): Promise<void> {
+function makeGraphPost(accessToken: string) {
+  return async function graphPost(
+    endpoint: string,
+    params: Record<string, string>,
+  ): Promise<Record<string, unknown>> {
+    const body = new URLSearchParams({ ...params, access_token: accessToken })
+    const res = await fetch(`${GRAPH_BASE}${endpoint}`, { method: 'POST', body })
+    const json = await res.json()
+    console.error(`[Meta API] ${endpoint}`, res.status, JSON.stringify(json))
+    if (!res.ok) throw new Error(`Meta API: ${JSON.stringify(json)}`)
+    return json as Record<string, unknown>
+  }
+}
+
+async function pollContainer(containerId: string, accessToken: string): Promise<void> {
   for (let i = 0; i < 24; i++) {
     const res = await fetch(
-      `${GRAPH_BASE}/${containerId}?fields=status_code&access_token=${process.env.META_ACCESS_TOKEN}`,
+      `${GRAPH_BASE}/${containerId}?fields=status_code&access_token=${accessToken}`,
     )
     const json = (await res.json()) as { status_code?: string }
     if (json.status_code === 'FINISHED') return
@@ -37,6 +45,11 @@ export interface PublishOptions {
    * the cron processor for atomic claim semantics.
    */
   allowAnyStatus?: boolean
+  /**
+   * Per-user Meta credentials. Falls back to env vars if not provided
+   * (used by the background cron processor which has no user session).
+   */
+  credentials?: PublishCredentials
 }
 
 export async function publishPost(
@@ -44,8 +57,8 @@ export async function publishPost(
   postId: string,
   options: PublishOptions = {},
 ): Promise<{ metaPostIds: string[] }> {
-  const igUserId = process.env.META_IG_USER_ID
-  const accessToken = process.env.META_ACCESS_TOKEN
+  const igUserId = options.credentials?.igUserId ?? process.env.META_IG_USER_ID
+  const accessToken = options.credentials?.accessToken ?? process.env.META_ACCESS_TOKEN
   if (!igUserId || !accessToken) throw new Error('Meta credentials not configured')
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -71,6 +84,7 @@ export async function publishPost(
 
   const p = post as Post
   const metaPostIds: string[] = []
+  const graphPost = makeGraphPost(accessToken)
 
   try {
     // ── Instagram ────────────────────────────────────────────────────────────
@@ -83,7 +97,7 @@ export async function publishPost(
           share_to_feed: 'true',
           thumb_offset: '2000',
         })
-        await pollContainer(container.id as string)
+        await pollContainer(container.id as string, accessToken)
         const pub = await graphPost(`/${igUserId}/media_publish`, {
           creation_id: container.id as string,
         })
@@ -95,7 +109,7 @@ export async function publishPost(
             media_type: 'STORIES',
             ...(p.video_url ? { video_url: p.video_url } : { image_url: mediaUrl }),
           })
-          if (p.video_url) await pollContainer(container.id as string)
+          if (p.video_url) await pollContainer(container.id as string, accessToken)
           const pub = await graphPost(`/${igUserId}/media_publish`, {
             creation_id: container.id as string,
           })
@@ -117,8 +131,8 @@ export async function publishPost(
       }
     }
 
-    // ── Facebook (only if META_FB_PAGE_ID is set) ────────────────────────────
-    const fbPageId = process.env.META_FB_PAGE_ID
+    // ── Facebook ─────────────────────────────────────────────────────────────
+    const fbPageId = options.credentials?.fbPageId ?? process.env.META_FB_PAGE_ID
     if (fbPageId && (p.platform === 'facebook' || p.platform === 'both')) {
       if (p.content_type === 'reel' && p.video_url) {
         const video = await graphPost(`/${fbPageId}/videos`, {

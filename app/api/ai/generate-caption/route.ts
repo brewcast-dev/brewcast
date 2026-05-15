@@ -1,10 +1,12 @@
 import { NextResponse } from 'next/server'
 import { generateObject } from 'ai'
-import { google } from '@ai-sdk/google'
-import { groq } from '@ai-sdk/groq'
-import { mistral } from '@ai-sdk/mistral'
+import { createGoogleGenerativeAI } from '@ai-sdk/google'
+import { createGroq } from '@ai-sdk/groq'
+import { createMistral } from '@ai-sdk/mistral'
 import { z } from 'zod'
 import type { PhotoAnalysis } from '../analyze-photo/route'
+import { createSessionClient } from '@/lib/supabase-server'
+import { getUserConfig, resolveConfig } from '@/lib/get-user-config'
 
 const CaptionSchema = z.object({
   caption: z.string().describe('Instagram caption, 1-3 sentences, with emojis'),
@@ -13,8 +15,8 @@ const CaptionSchema = z.object({
 
 export type CaptionResult = z.infer<typeof CaptionSchema>
 
-// District 6 brand context injected into every caption prompt
-const DISTRICT6_BRAND_CONTEXT = `
+// Default brand context used when the user hasn't configured their own
+const DEFAULT_BRAND_CONTEXT = `
 District 6 Brewery is a craft brewery in Bangalore, India.
 Brand voice: casual, warm, craft-forward, local Bangalore pride, community-first.
 Tone: like a knowledgeable friend who loves beer, not a corporate account.
@@ -38,49 +40,23 @@ Subjects visible: ${analysis.subjects.join(', ')}
 Photo mood: ${analysis.mood}${extra}
 
 Return a caption (1-3 sentences with emojis) and 5-8 hashtags (no # prefix).
-The caption should feel authentic to a Bangalore craft brewery. Keep it short and punchy.`
-}
-
-async function captionWithGemini(
-  analysis: PhotoAnalysis,
-  breweryConcepts?: string[],
-): Promise<CaptionResult> {
-  const { object } = await generateObject({
-    model: google('gemini-2.5-flash'),
-    schema: CaptionSchema,
-    system: DISTRICT6_BRAND_CONTEXT,
-    prompt: buildPrompt(analysis, breweryConcepts),
-  })
-  return object
-}
-
-async function captionWithGroq(
-  analysis: PhotoAnalysis,
-  breweryConcepts?: string[],
-): Promise<CaptionResult> {
-  const { object } = await generateObject({
-    model: groq('llama-3.3-70b-versatile'),
-    schema: CaptionSchema,
-    system: DISTRICT6_BRAND_CONTEXT,
-    prompt: buildPrompt(analysis, breweryConcepts),
-  })
-  return object
-}
-
-async function captionWithMistral(
-  analysis: PhotoAnalysis,
-  breweryConcepts?: string[],
-): Promise<CaptionResult> {
-  const { object } = await generateObject({
-    model: mistral('mistral-small-latest'),
-    schema: CaptionSchema,
-    system: DISTRICT6_BRAND_CONTEXT,
-    prompt: buildPrompt(analysis, breweryConcepts),
-  })
-  return object
+The caption should feel authentic to the brewery. Keep it short and punchy.`
 }
 
 export async function POST(req: Request) {
+  const client = createSessionClient()
+  const { data: { user } } = await client.auth.getUser()
+  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+
+  const rawConfig = await getUserConfig(user.id)
+  const config = resolveConfig(rawConfig)
+
+  const google = createGoogleGenerativeAI({ apiKey: config.googleApiKey })
+  const groq = createGroq({ apiKey: config.groqApiKey })
+  const mistral = createMistral({ apiKey: config.mistralApiKey })
+
+  const brandContext = config.brandContext ?? DEFAULT_BRAND_CONTEXT
+
   let body: { analysis: PhotoAnalysis; breweryConcepts?: string[] }
   try {
     body = await req.json()
@@ -93,27 +69,43 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'analysis is required' }, { status: 400 })
   }
 
+  const prompt = buildPrompt(analysis, breweryConcepts)
   const errors: Record<string, string> = {}
 
   try {
-    const result = await captionWithGemini(analysis, breweryConcepts)
-    return NextResponse.json(result)
+    const { object } = await generateObject({
+      model: google('gemini-2.5-flash'),
+      schema: CaptionSchema,
+      system: brandContext,
+      prompt,
+    })
+    return NextResponse.json(object)
   } catch (err) {
     errors.gemini = (err as Error).message
     console.warn('[generate-caption] Gemini failed, trying Groq:', errors.gemini)
   }
 
   try {
-    const result = await captionWithGroq(analysis, breweryConcepts)
-    return NextResponse.json(result)
+    const { object } = await generateObject({
+      model: groq('llama-3.3-70b-versatile'),
+      schema: CaptionSchema,
+      system: brandContext,
+      prompt,
+    })
+    return NextResponse.json(object)
   } catch (err) {
     errors.groq = (err as Error).message
     console.warn('[generate-caption] Groq failed, trying Mistral:', errors.groq)
   }
 
   try {
-    const result = await captionWithMistral(analysis, breweryConcepts)
-    return NextResponse.json(result)
+    const { object } = await generateObject({
+      model: mistral('mistral-small-latest'),
+      schema: CaptionSchema,
+      system: brandContext,
+      prompt,
+    })
+    return NextResponse.json(object)
   } catch (err) {
     errors.mistral = (err as Error).message
     console.error('[generate-caption] All three caption providers failed.')

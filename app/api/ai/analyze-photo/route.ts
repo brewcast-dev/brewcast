@@ -1,9 +1,11 @@
 import { NextResponse } from 'next/server'
 import { generateObject } from 'ai'
-import { google } from '@ai-sdk/google'
-import { groq } from '@ai-sdk/groq'
-import { mistral } from '@ai-sdk/mistral'
+import { createGoogleGenerativeAI } from '@ai-sdk/google'
+import { createGroq } from '@ai-sdk/groq'
+import { createMistral } from '@ai-sdk/mistral'
 import { z } from 'zod'
+import { createSessionClient } from '@/lib/supabase-server'
+import { getUserConfig, resolveConfig } from '@/lib/get-user-config'
 
 const AnalysisSchema = z.object({
   mood: z.string().describe('Overall mood: warm, cool, moody, vivid, fade, noir, golden, or neutral'),
@@ -28,72 +30,18 @@ For suggestedFilter, choose based on the mood:
 - golden: sunset, golden ales, warm amber hues
 - original: already well-lit professional shots`
 
-async function analyzeWithGemini(imageUrl: string): Promise<PhotoAnalysis> {
-  const { object } = await generateObject({
-    model: google('gemini-2.5-flash'),
-    schema: AnalysisSchema,
-    messages: [
-      {
-        role: 'user',
-        content: [
-          { type: 'image', image: new URL(imageUrl) },
-          {
-            type: 'text',
-            text: 'Analyse this brewery photo. Return the mood, subjects, best Instagram filter, visual quality score (0-100), confidence, and a one-sentence description.',
-          },
-        ],
-      },
-    ],
-    system: SYSTEM_PROMPT,
-  })
-  return object
-}
-
-async function analyzeWithGroq(imageUrl: string): Promise<PhotoAnalysis> {
-  // Llama 4 Scout — current Groq vision model (Llama 3.2 vision was decommissioned mid-2025)
-  const { object } = await generateObject({
-    model: groq('meta-llama/llama-4-scout-17b-16e-instruct'),
-    schema: AnalysisSchema,
-    messages: [
-      {
-        role: 'user',
-        content: [
-          { type: 'image', image: new URL(imageUrl) },
-          {
-            type: 'text',
-            text: 'Analyse this brewery photo. Return the mood, subjects, best Instagram filter, visual quality score (0-100), confidence, and a one-sentence description.',
-          },
-        ],
-      },
-    ],
-    system: SYSTEM_PROMPT,
-  })
-  return object
-}
-
-async function analyzeWithMistral(imageUrl: string): Promise<PhotoAnalysis> {
-  // Pixtral — Mistral's multimodal model
-  const { object } = await generateObject({
-    model: mistral('pixtral-12b-2409'),
-    schema: AnalysisSchema,
-    messages: [
-      {
-        role: 'user',
-        content: [
-          { type: 'image', image: new URL(imageUrl) },
-          {
-            type: 'text',
-            text: 'Analyse this brewery photo. Return the mood, subjects, best Instagram filter, visual quality score (0-100), confidence, and a one-sentence description.',
-          },
-        ],
-      },
-    ],
-    system: SYSTEM_PROMPT,
-  })
-  return object
-}
-
 export async function POST(req: Request) {
+  const client = createSessionClient()
+  const { data: { user } } = await client.auth.getUser()
+  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+
+  const rawConfig = await getUserConfig(user.id)
+  const config = resolveConfig(rawConfig)
+
+  const google = createGoogleGenerativeAI({ apiKey: config.googleApiKey })
+  const groq = createGroq({ apiKey: config.groqApiKey })
+  const mistral = createMistral({ apiKey: config.mistralApiKey })
+
   let body: { imageUrl: string }
   try {
     body = await req.json()
@@ -106,27 +54,50 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'imageUrl is required' }, { status: 400 })
   }
 
+  const imageContent = [
+    { type: 'image' as const, image: new URL(imageUrl) },
+    {
+      type: 'text' as const,
+      text: 'Analyse this brewery photo. Return the mood, subjects, best Instagram filter, visual quality score (0-100), confidence, and a one-sentence description.',
+    },
+  ]
+
   const errors: Record<string, string> = {}
 
   try {
-    const analysis = await analyzeWithGemini(imageUrl)
-    return NextResponse.json(analysis)
+    const { object } = await generateObject({
+      model: google('gemini-2.5-flash'),
+      schema: AnalysisSchema,
+      messages: [{ role: 'user', content: imageContent }],
+      system: SYSTEM_PROMPT,
+    })
+    return NextResponse.json(object)
   } catch (err) {
     errors.gemini = (err as Error).message
     console.warn('[analyze-photo] Gemini failed, trying Groq:', errors.gemini)
   }
 
   try {
-    const analysis = await analyzeWithGroq(imageUrl)
-    return NextResponse.json(analysis)
+    const { object } = await generateObject({
+      model: groq('meta-llama/llama-4-scout-17b-16e-instruct'),
+      schema: AnalysisSchema,
+      messages: [{ role: 'user', content: imageContent }],
+      system: SYSTEM_PROMPT,
+    })
+    return NextResponse.json(object)
   } catch (err) {
     errors.groq = (err as Error).message
     console.warn('[analyze-photo] Groq failed, trying Mistral:', errors.groq)
   }
 
   try {
-    const analysis = await analyzeWithMistral(imageUrl)
-    return NextResponse.json(analysis)
+    const { object } = await generateObject({
+      model: mistral('pixtral-12b-2409'),
+      schema: AnalysisSchema,
+      messages: [{ role: 'user', content: imageContent }],
+      system: SYSTEM_PROMPT,
+    })
+    return NextResponse.json(object)
   } catch (err) {
     errors.mistral = (err as Error).message
     console.error('[analyze-photo] All three vision providers failed.')
