@@ -37,7 +37,7 @@ export default function ProcessQueueButton() {
         <button
           onClick={handleClick}
           disabled={status === 'running'}
-          className="bg-cream hover:bg-bone disabled:opacity-50 text-cream font-semibold rounded-lg px-4 py-2 text-sm transition-colors flex-shrink-0"
+          className="bg-cream hover:bg-bone disabled:opacity-50 text-ink font-medium rounded-full px-5 py-2 text-sm transition-colors flex-shrink-0"
         >
           {status === 'running' ? 'Running…' : 'Run now'}
         </button>

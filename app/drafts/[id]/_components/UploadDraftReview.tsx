@@ -88,7 +88,7 @@ export default function UploadDraftReview({ draft }: { draft: UploadDraft }) {
           <span className={`px-2.5 py-0.5 rounded text-xs font-medium ${statusStyle}`}>
             {draft.status}
           </span>
-          <span className="px-2.5 py-0.5 rounded text-xs font-medium bg-cream/10 text-cream border border-cream/30/20">
+          <span className="px-2.5 py-0.5 rounded text-xs font-medium bg-cream/10 text-cream border border-cream/20">
             from /upload
           </span>
         </div>
@@ -157,7 +157,7 @@ export default function UploadDraftReview({ draft }: { draft: UploadDraft }) {
           <button
             onClick={() => run(() => approveUploadDraft(draft.id))}
             disabled={isPending}
-            className="w-full px-4 py-2.5 rounded-lg bg-sky-500/20 hover:bg-sky-500/30 disabled:opacity-50 text-white text-sm font-medium transition-colors"
+            className="w-full px-4 py-2.5 rounded-full bg-sky-500/20 hover:bg-sky-500/30 disabled:opacity-50 text-cream text-sm font-medium transition-colors"
           >
             {isPending ? 'Saving…' : 'Approve'}
           </button>
@@ -229,7 +229,7 @@ export default function UploadDraftReview({ draft }: { draft: UploadDraft }) {
                     )
                   }
                   disabled={isPending}
-                  className="flex-1 px-3 py-2 rounded-lg bg-emerald hover:bg-emerald/80 disabled:opacity-50 text-white text-sm font-medium transition-colors"
+                  className="flex-1 px-3 py-2 rounded-full bg-emerald hover:bg-emerald/80 disabled:opacity-50 text-ink text-sm font-medium transition-colors"
                 >
                   {isPending ? 'Publishing…' : 'Publish'}
                 </button>
@@ -239,7 +239,7 @@ export default function UploadDraftReview({ draft }: { draft: UploadDraft }) {
             <button
               onClick={() => setConfirmPublish(true)}
               disabled={isPending}
-              className="w-full px-4 py-2.5 rounded-lg bg-emerald hover:bg-emerald/80 disabled:opacity-50 text-white text-sm font-medium transition-colors"
+              className="w-full px-4 py-2.5 rounded-full bg-emerald hover:bg-emerald/80 disabled:opacity-50 text-ink text-sm font-medium transition-colors"
             >
               Publish now
             </button>
@@ -264,7 +264,7 @@ export default function UploadDraftReview({ draft }: { draft: UploadDraft }) {
             <button
               onClick={() => run(() => restoreUploadDraft(draft.id))}
               disabled={isPending}
-              className="w-full px-3 py-2 rounded-lg bg-sky-500/20 hover:bg-sky-500/30 disabled:opacity-50 text-white text-sm font-medium transition-colors"
+              className="w-full px-3 py-2 rounded-full bg-sky-500/20 hover:bg-sky-500/30 disabled:opacity-50 text-cream text-sm font-medium transition-colors"
             >
               {isPending ? 'Restoring…' : 'Restore'}
             </button>
@@ -311,7 +311,7 @@ export default function UploadDraftReview({ draft }: { draft: UploadDraft }) {
                   <button
                     onClick={() => run(() => archiveUploadDraft(draft.id), () => router.push('/drafts'))}
                     disabled={isPending}
-                    className="flex-1 px-3 py-2 rounded-lg bg-ember/40 hover:bg-cream disabled:opacity-50 text-cream text-sm font-medium transition-colors"
+                    className="flex-1 px-3 py-2 rounded-full bg-ember/40 hover:bg-ember/60 disabled:opacity-50 text-cream text-sm font-medium transition-colors"
                   >
                     {isPending ? 'Archiving…' : 'Archive'}
                   </button>

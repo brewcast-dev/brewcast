@@ -58,7 +58,7 @@ export default function AddUserForm() {
       <button
         type="submit"
         disabled={status === 'adding'}
-        className="bg-cream hover:bg-bone disabled:opacity-50 text-cream font-semibold rounded-lg px-4 py-2 text-sm transition-colors"
+        className="bg-cream hover:bg-bone disabled:opacity-50 text-ink font-medium rounded-full px-5 py-2 text-sm transition-colors"
       >
         {status === 'adding' ? 'Adding…' : 'Add user'}
       </button>

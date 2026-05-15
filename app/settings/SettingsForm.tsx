@@ -128,7 +128,7 @@ export default function SettingsForm({ config }: Props) {
         <button
           type="submit"
           disabled={status === 'saving'}
-          className="bg-cream hover:bg-bone disabled:opacity-50 text-cream font-semibold rounded-lg px-5 py-2.5 text-sm transition-colors"
+          className="bg-cream hover:bg-bone disabled:opacity-50 text-ink font-medium rounded-full px-6 py-2.5 text-sm transition-colors"
         >
           {status === 'saving' ? 'Saving…' : 'Save settings'}
         </button>
