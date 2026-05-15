@@ -554,32 +554,6 @@ export default function UploadPage() {
       />
 
       {/* Header */}
-      <header className="sticky top-0 z-10 flex items-center justify-between px-6 py-3 border-b border-zinc-800 bg-zinc-900">
-        <Link href="/" className="text-amber-400 font-bold text-lg tracking-tight">
-          BrewCast
-        </Link>
-        <nav className="flex items-center gap-1">
-          <Link
-            href="/chat"
-            className="px-3 py-1.5 rounded-lg text-xs text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200 transition-colors"
-          >
-            Chat
-          </Link>
-          <Link
-            href="/drafts"
-            className="px-3 py-1.5 rounded-lg text-xs text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200 transition-colors"
-          >
-            Drafts
-          </Link>
-          <Link
-            href="/analytics"
-            className="px-3 py-1.5 rounded-lg text-xs text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200 transition-colors"
-          >
-            Analytics
-          </Link>
-        </nav>
-      </header>
-
       <main className="flex-1 max-w-5xl mx-auto w-full px-6 py-10">
 
         {/* ── SETUP PHASE ─────────────────────────────────────────────────── */}

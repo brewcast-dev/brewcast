@@ -117,38 +117,6 @@ export default async function DraftsPage({
 
   return (
     <div className="min-h-screen flex flex-col">
-      <header className="sticky top-0 z-10 flex items-center justify-between px-6 py-3 border-b border-zinc-800 bg-zinc-900">
-        <Link href="/" className="text-amber-400 font-bold text-lg tracking-tight">
-          BrewCast
-        </Link>
-        <nav className="flex items-center gap-1">
-          <Link
-            href="/chat"
-            className="px-3 py-1.5 rounded-lg text-xs text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200 transition-colors"
-          >
-            ← Chat
-          </Link>
-          <Link
-            href="/upload"
-            className="px-3 py-1.5 rounded-lg text-xs text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200 transition-colors"
-          >
-            Upload
-          </Link>
-          <Link
-            href="/analytics"
-            className="px-3 py-1.5 rounded-lg text-xs text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200 transition-colors"
-          >
-            Analytics
-          </Link>
-          <Link
-            href="/settings"
-            className="px-3 py-1.5 rounded-lg text-xs text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200 transition-colors"
-          >
-            Settings
-          </Link>
-        </nav>
-      </header>
-
       <main className="flex-1 max-w-5xl mx-auto w-full px-6 py-8">
         <div className="flex items-center justify-between mb-6">
           <h1 className="text-2xl font-bold text-zinc-100">Drafts</h1>

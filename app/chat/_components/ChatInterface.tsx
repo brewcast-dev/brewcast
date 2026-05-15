@@ -86,34 +86,15 @@ export default function ChatInterface() {
 
   return (
     <div className="flex flex-col h-screen overflow-hidden">
-      {/* Header */}
-      <header className="flex items-center justify-between px-6 py-3 border-b border-zinc-800 flex-shrink-0">
-        <Link href="/" className="text-amber-400 font-bold text-lg tracking-tight">
-          BrewCast
-        </Link>
-        <nav className="flex items-center gap-1">
-          {[
-            { href: '/drafts',    label: 'Drafts'     },
-            { href: '/analytics', label: 'Analytics'  },
-            { href: '/settings',  label: 'Settings'   },
-          ].map(({ href, label }) => (
-            <Link
-              key={href}
-              href={href}
-              className="px-3 py-1.5 rounded-lg text-xs text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200 transition-colors"
-            >
-              {label}
-            </Link>
-          ))}
-          <div className="w-px h-3.5 bg-zinc-700 mx-1" />
-          <button
-            onClick={handleClear}
-            disabled={messages.length === 0 && !isStreaming}
-            className="px-3 py-1.5 rounded-lg text-xs text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-          >
-            Clear chat
-          </button>
-        </nav>
+      {/* Page header — global nav lives in the root layout */}
+      <header className="flex items-center justify-end px-6 py-2 border-b border-zinc-800 flex-shrink-0">
+        <button
+          onClick={handleClear}
+          disabled={messages.length === 0 && !isStreaming}
+          className="px-3 py-1.5 rounded-lg text-xs text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+        >
+          Clear chat
+        </button>
       </header>
 
       {/* Message list — scroll container is full-width so the scrollbar sits
