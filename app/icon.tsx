@@ -12,6 +12,7 @@ export default function Icon() {
           background: '#0a0a0a',
           width: '100%',
           height: '100%',
+          borderRadius: '50%',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
@@ -19,7 +20,7 @@ export default function Icon() {
           fontFamily: 'Georgia, "Times New Roman", serif',
           fontStyle: 'italic',
           fontWeight: 600,
-          fontSize: 22,
+          fontSize: 20,
           letterSpacing: -1,
           // Tiny optical shift to centre italic letters visually
           paddingBottom: 2,
