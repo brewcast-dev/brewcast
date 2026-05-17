@@ -212,6 +212,158 @@ function PhotoCard({
   )
 }
 
+// ─── Carousel sub-components ─────────────────────────────────────────────────
+
+function CarouselItemCard({
+  draft,
+  index,
+  onFilterChange,
+}: {
+  draft: DraftCard
+  index: number
+  onFilterChange: (id: string, filter: FilterName) => void
+}) {
+  const canvasRef = useRef<HTMLCanvasElement>(null)
+  const imgRef = useRef<HTMLImageElement | null>(null)
+  const [imgLoaded, setImgLoaded] = useState(false)
+
+  useEffect(() => {
+    if (!canvasRef.current || !imgLoaded || !imgRef.current) return
+    applyFilterToCanvas(canvasRef.current, imgRef.current, draft.filter)
+  }, [draft.filter, imgLoaded])
+
+  useEffect(() => {
+    const img = new Image()
+    img.crossOrigin = 'anonymous'
+    img.onload = () => { imgRef.current = img; setImgLoaded(true) }
+    img.src = draft.photo.url
+  }, [draft.photo.url])
+
+  return (
+    <div className="flex-none flex flex-col gap-2" style={{ width: '9rem' }}>
+      <div className="relative aspect-square bg-onyx rounded-lg overflow-hidden">
+        <span className="absolute top-1.5 left-1.5 z-10 w-5 h-5 rounded-full bg-black/60 flex items-center justify-center text-xs font-semibold text-cream">
+          {index + 1}
+        </span>
+        {!imgLoaded && (
+          <div className="absolute inset-0 flex items-center justify-center">
+            <span className="text-ash text-xs">Loading…</span>
+          </div>
+        )}
+        <canvas
+          ref={canvasRef}
+          className={`w-full h-full object-cover transition-opacity duration-200 ${imgLoaded ? 'opacity-100' : 'opacity-0'}`}
+        />
+      </div>
+      <select
+        value={draft.filter}
+        onChange={(e) => onFilterChange(draft.id, e.target.value as FilterName)}
+        className="w-full rounded-lg bg-onyx border border-white/[0.08] text-cream text-xs px-2 py-1.5 focus:outline-none focus:border-cream/30"
+      >
+        {(Object.keys(FILTERS) as FilterName[]).map((f) => (
+          <option key={f} value={f}>{FILTERS[f].label}</option>
+        ))}
+      </select>
+    </div>
+  )
+}
+
+function CarouselDraftCard({
+  drafts,
+  caption,
+  hashtags,
+  platforms,
+  onCaptionChange,
+  onPlatformsChange,
+  onFilterChange,
+}: {
+  drafts: DraftCard[]
+  caption: string
+  hashtags: string[]
+  platforms: ('instagram' | 'facebook')[]
+  onCaptionChange: (c: string) => void
+  onPlatformsChange: (p: ('instagram' | 'facebook')[]) => void
+  onFilterChange: (draftId: string, filter: FilterName) => void
+}) {
+  const togglePlatform = (p: 'instagram' | 'facebook') => {
+    const has = platforms.includes(p)
+    const next = has ? platforms.filter((x) => x !== p) : [...platforms, p]
+    if (next.length > 0) onPlatformsChange(next)
+  }
+
+  return (
+    <div className="rounded-2xl border border-amber-500/20 bg-obsidian overflow-hidden">
+      <div className="flex items-center gap-2 px-4 pt-4 pb-2">
+        <span className="text-xs font-semibold text-amber-400 uppercase tracking-wider">
+          Carousel · {drafts.length} images
+        </span>
+        <span className="text-xs text-smoke">Scroll to see all · select a filter per image</span>
+      </div>
+
+      {/* Horizontal filmstrip */}
+      <div className="flex gap-3 px-4 pb-4 overflow-x-auto">
+        {drafts.map((draft, i) => (
+          <CarouselItemCard
+            key={draft.id}
+            draft={draft}
+            index={i}
+            onFilterChange={onFilterChange}
+          />
+        ))}
+      </div>
+
+      {/* Shared caption, hashtags, platforms */}
+      <div className="flex flex-col gap-3 p-4 border-t border-white/[0.06]">
+        <div>
+          <label className="text-xs text-ash uppercase tracking-wider mb-1 block">
+            Caption{' '}
+            <span className="text-smoke normal-case">(shared across all {drafts.length} images)</span>
+          </label>
+          <textarea
+            value={caption}
+            onChange={(e) => onCaptionChange(e.target.value)}
+            rows={4}
+            className="w-full rounded-lg bg-onyx border border-white/[0.08] text-cream text-sm px-3 py-2 resize-none focus:outline-none focus:border-cream/30 leading-relaxed"
+          />
+        </div>
+
+        <div>
+          <label className="text-xs text-ash uppercase tracking-wider mb-1.5 block">Hashtags</label>
+          <div className="flex flex-wrap gap-1.5">
+            {hashtags.map((tag) => (
+              <span
+                key={tag}
+                className="inline-block rounded-full bg-onyx border border-white/[0.08] px-2.5 py-0.5 text-xs text-cream"
+              >
+                #{tag}
+              </span>
+            ))}
+          </div>
+        </div>
+
+        <div>
+          <label className="text-xs text-ash uppercase tracking-wider mb-1.5 block">Platforms</label>
+          <div className="flex gap-2 max-w-xs">
+            {(['instagram', 'facebook'] as const).map((p) => (
+              <button
+                key={p}
+                onClick={() => togglePlatform(p)}
+                className={`flex-1 rounded-lg border text-xs py-1.5 capitalize transition-colors ${
+                  platforms.includes(p)
+                    ? 'border-cream/30 bg-cream/10 text-cream'
+                    : 'border-white/[0.08] bg-onyx text-ash hover:text-bone'
+                }`}
+              >
+                {p}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ─── Progress step display ────────────────────────────────────────────────────
 
 function ProgressStep({
@@ -327,6 +479,10 @@ export default function UploadPage() {
   const [activeStep, setActiveStep] = useState(0)
   const [toast, setToast] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
+  const [carouselMode, setCarouselMode] = useState(false)
+  const [carouselCaption, setCarouselCaption] = useState('')
+  const [carouselHashtags, setCarouselHashtags] = useState<string[]>([])
+  const [carouselPlatforms, setCarouselPlatforms] = useState<('instagram' | 'facebook')[]>(['instagram'])
   const canvasWorkRef = useRef<HTMLCanvasElement | null>(null)
 
   const togglePhotoSelection = useCallback((name: string) => {
@@ -362,6 +518,17 @@ export default function UploadPage() {
   const updateDraft = useCallback((id: string, patch: Partial<DraftCard>) => {
     setDrafts((prev) => prev.map((d) => (d.id === id ? { ...d, ...patch } : d)))
   }, [])
+
+  const toggleCarouselMode = useCallback(() => {
+    setCarouselMode((prev) => {
+      if (!prev && drafts.length > 0) {
+        setCarouselCaption(drafts[0].caption)
+        setCarouselHashtags(drafts[0].hashtags)
+        setCarouselPlatforms(drafts[0].platforms)
+      }
+      return !prev
+    })
+  }, [drafts])
 
   // ── Apply filter + upload edited image in browser ─────────────────────────
   const renderAndUploadFiltered = useCallback(
@@ -500,38 +667,79 @@ export default function UploadPage() {
   const handleSaveAll = useCallback(async () => {
     setSaving(true)
     try {
-      // Re-render edited images for any cards whose filter changed during review
-      const finalized = await Promise.all(
-        drafts.map(async (d) => {
-          let editedUrl = d.editedImageUrl
-          if (!editedUrl || d.filter !== d.analysis.suggestedFilter) {
-            editedUrl = await renderAndUploadFiltered(d)
-          }
-          return {
-            image_url: d.photo.url,
-            edited_image_url: editedUrl,
-            filter_applied: d.filter,
-            caption: d.caption,
-            hashtags: d.hashtags,
-            platforms: d.platforms,
-          }
-        }),
-      )
+      if (carouselMode && drafts.length >= 2) {
+        // Bundle all photos into a single carousel draft
+        const uploadedDrafts = await Promise.all(
+          drafts.map(async (d) => {
+            let editedUrl = d.editedImageUrl
+            if (!editedUrl || d.filter !== d.analysis.suggestedFilter) {
+              editedUrl = await renderAndUploadFiltered(d)
+            }
+            return { ...d, editedImageUrl: editedUrl ?? undefined }
+          }),
+        )
 
-      const res = await fetch('/api/drafts/bulk-save', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ drafts: finalized }),
-      })
+        const imageUrls = uploadedDrafts.map((d) => d.photo.url)
+        const editedImageUrls = uploadedDrafts.map((d) => d.editedImageUrl ?? d.photo.url)
 
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}))
-        throw new Error((err as { error?: string }).error ?? 'Save failed')
+        const res = await fetch('/api/drafts/bulk-save', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            drafts: [{
+              image_url: imageUrls[0],
+              edited_image_url: editedImageUrls[0],
+              filter_applied: drafts[0].filter,
+              caption: carouselCaption,
+              hashtags: carouselHashtags,
+              platforms: carouselPlatforms,
+              carousel: true,
+              image_urls: imageUrls,
+              edited_image_urls: editedImageUrls,
+            }],
+          }),
+        })
+
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}))
+          throw new Error((err as { error?: string }).error ?? 'Save failed')
+        }
+
+        setToast(`Carousel draft saved (${drafts.length} images) — opening /drafts…`)
+      } else {
+        // Normal mode: one draft per photo
+        const finalized = await Promise.all(
+          drafts.map(async (d) => {
+            let editedUrl = d.editedImageUrl
+            if (!editedUrl || d.filter !== d.analysis.suggestedFilter) {
+              editedUrl = await renderAndUploadFiltered(d)
+            }
+            return {
+              image_url: d.photo.url,
+              edited_image_url: editedUrl,
+              filter_applied: d.filter,
+              caption: d.caption,
+              hashtags: d.hashtags,
+              platforms: d.platforms,
+            }
+          }),
+        )
+
+        const res = await fetch('/api/drafts/bulk-save', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ drafts: finalized }),
+        })
+
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}))
+          throw new Error((err as { error?: string }).error ?? 'Save failed')
+        }
+
+        const { count } = await res.json() as { count: number }
+        setToast(`${count} draft${count !== 1 ? 's' : ''} saved — opening /drafts…`)
       }
 
-      const { count } = await res.json() as { count: number }
-      setToast(`${count} draft${count !== 1 ? 's' : ''} saved — opening /drafts…`)
-      // Refresh the router cache so /drafts re-fetches, then navigate.
       router.refresh()
       setTimeout(() => router.push('/drafts'), 800)
     } catch (err) {
@@ -539,7 +747,7 @@ export default function UploadPage() {
     } finally {
       setSaving(false)
     }
-  }, [drafts, renderAndUploadFiltered, router])
+  }, [drafts, carouselMode, carouselCaption, carouselHashtags, carouselPlatforms, renderAndUploadFiltered, router])
 
   // ─── Render ──────────────────────────────────────────────────────────────────
 
@@ -790,30 +998,58 @@ export default function UploadPage() {
               </div>
               <div className="flex items-center gap-3">
                 <button
-                  onClick={() => setPhase('setup')}
+                  onClick={() => { setPhase('setup'); setCarouselMode(false) }}
                   className="px-4 py-2 rounded-lg border border-white/[0.08] text-ash hover:text-cream hover:border-white/[0.10] text-sm transition-colors"
                 >
                   ← Start over
                 </button>
+                {drafts.length >= 2 && (
+                  <button
+                    onClick={toggleCarouselMode}
+                    className={`px-4 py-2 rounded-lg border text-sm transition-colors ${
+                      carouselMode
+                        ? 'border-amber-500/30 bg-amber-500/10 text-amber-400'
+                        : 'border-white/[0.08] text-ash hover:text-cream hover:border-white/[0.10]'
+                    }`}
+                  >
+                    {carouselMode ? '◼ Carousel on' : '◻ Carousel'}
+                  </button>
+                )}
                 <button
                   onClick={handleSaveAll}
                   disabled={saving}
                   className="px-5 py-2 rounded-lg bg-cream hover:bg-bone disabled:opacity-50 text-ink font-semibold text-sm transition-colors"
                 >
-                  {saving ? 'Saving…' : `Save All to Drafts (${drafts.length})`}
+                  {saving
+                    ? 'Saving…'
+                    : carouselMode
+                    ? 'Save Carousel Draft'
+                    : `Save All to Drafts (${drafts.length})`}
                 </button>
               </div>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
-              {drafts.map((draft) => (
-                <PhotoCard
-                  key={draft.id}
-                  draft={draft}
-                  onChange={(patch) => updateDraft(draft.id, patch)}
-                />
-              ))}
-            </div>
+            {carouselMode ? (
+              <CarouselDraftCard
+                drafts={drafts}
+                caption={carouselCaption}
+                hashtags={carouselHashtags}
+                platforms={carouselPlatforms}
+                onCaptionChange={setCarouselCaption}
+                onPlatformsChange={setCarouselPlatforms}
+                onFilterChange={(id, filter) => updateDraft(id, { filter })}
+              />
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
+                {drafts.map((draft) => (
+                  <PhotoCard
+                    key={draft.id}
+                    draft={draft}
+                    onChange={(patch) => updateDraft(draft.id, patch)}
+                  />
+                ))}
+              </div>
+            )}
 
             <div className="flex justify-end pt-2">
               <button
@@ -821,7 +1057,11 @@ export default function UploadPage() {
                 disabled={saving}
                 className="px-6 py-2.5 rounded-xl bg-cream hover:bg-bone disabled:opacity-50 text-ink font-semibold text-sm transition-colors"
               >
-                {saving ? 'Saving…' : `Save All to Drafts (${drafts.length})`}
+                {saving
+                  ? 'Saving…'
+                  : carouselMode
+                  ? 'Save Carousel Draft'
+                  : `Save All to Drafts (${drafts.length})`}
               </button>
             </div>
           </div>

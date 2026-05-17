@@ -103,6 +103,9 @@ interface UploadDraftRow {
   platforms: string[]
   status: string
   scheduled_at: string | null
+  carousel: boolean
+  image_urls: string[]
+  edited_image_urls: string[]
 }
 
 function platformsToColumn(platforms: string[]): 'instagram' | 'facebook' | 'both' {
@@ -141,7 +144,12 @@ export async function queueUploadDraft(id: string, scheduledAt: string) {
   const draft = draftData as UploadDraftRow
 
   const dt = scheduledAt || new Date().toISOString()
-  const mediaUrl = draft.edited_image_url ?? draft.image_url
+  const isCarousel = draft.carousel && draft.image_urls?.length >= 2
+  const mediaUrls = isCarousel
+    ? (draft.edited_image_urls?.length === draft.image_urls.length
+        ? draft.edited_image_urls
+        : draft.image_urls)
+    : [(draft.edited_image_url ?? draft.image_url)]
 
   // 2. Insert into posts so the existing publish pipeline can pick it up
   const { data: postData, error: insertErr } = await supabase
@@ -150,10 +158,10 @@ export async function queueUploadDraft(id: string, scheduledAt: string) {
       status: 'queued',
       user_id: user.id,
       platform: platformsToColumn(draft.platforms ?? ['instagram']),
-      content_type: 'post',
+      content_type: isCarousel ? 'carousel' : 'post',
       caption: captionWithHashtags(draft.caption, draft.hashtags ?? []),
-      media_urls: [mediaUrl],
-      thumbnail_url: mediaUrl,
+      media_urls: mediaUrls,
+      thumbnail_url: mediaUrls[0],
       scheduled_at: dt,
     })
     .select('id')
@@ -224,7 +232,12 @@ export async function publishUploadDraftNow(id: string): Promise<{ postId: strin
   if (fetchErr || !draftData) throw new Error(fetchErr?.message ?? 'Draft not found')
   const draft = draftData as UploadDraftRow
 
-  const mediaUrl = draft.edited_image_url ?? draft.image_url
+  const isCarousel = draft.carousel && draft.image_urls?.length >= 2
+  const mediaUrls = isCarousel
+    ? (draft.edited_image_urls?.length === draft.image_urls.length
+        ? draft.edited_image_urls
+        : draft.image_urls)
+    : [(draft.edited_image_url ?? draft.image_url)]
 
   // 2. Insert into posts (status='queued' so publishPost will pick it up)
   const { data: postData, error: insertErr } = await supabase
@@ -233,10 +246,10 @@ export async function publishUploadDraftNow(id: string): Promise<{ postId: strin
       status: 'queued',
       user_id: user.id,
       platform: platformsToColumn(draft.platforms ?? ['instagram']),
-      content_type: 'post',
+      content_type: isCarousel ? 'carousel' : 'post',
       caption: captionWithHashtags(draft.caption, draft.hashtags ?? []),
-      media_urls: [mediaUrl],
-      thumbnail_url: mediaUrl,
+      media_urls: mediaUrls,
+      thumbnail_url: mediaUrls[0],
       scheduled_at: new Date().toISOString(),
     })
     .select('id')

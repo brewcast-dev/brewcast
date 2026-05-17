@@ -115,6 +115,28 @@ export async function publishPost(
           })
           metaPostIds.push(pub.id as string)
         }
+      } else if (p.content_type === 'carousel') {
+        const mediaUrls = (p.media_urls as string[] | null) ?? []
+        if (mediaUrls.length >= 2) {
+          const children: string[] = []
+          for (const imageUrl of mediaUrls) {
+            const child = await graphPost(`/${igUserId}/media`, {
+              image_url: imageUrl,
+              is_carousel_item: 'true',
+            })
+            children.push(child.id as string)
+          }
+          const container = await graphPost(`/${igUserId}/media`, {
+            media_type: 'CAROUSEL',
+            children: children.join(','),
+            caption: p.caption ?? '',
+          })
+          await new Promise((r) => setTimeout(r, 3000))
+          const pub = await graphPost(`/${igUserId}/media_publish`, {
+            creation_id: container.id as string,
+          })
+          metaPostIds.push(pub.id as string)
+        }
       } else {
         const imageUrl = (p.media_urls as string[] | null)?.[0] ?? p.thumbnail_url ?? ''
         if (imageUrl) {
@@ -141,6 +163,7 @@ export async function publishPost(
         })
         metaPostIds.push(video.id as string)
       } else {
+        // For carousels publish the first image to Facebook (carousel is IG-only)
         const imageUrl = (p.media_urls as string[] | null)?.[0] ?? ''
         if (imageUrl) {
           const photo = await graphPost(`/${fbPageId}/photos`, {

@@ -12,6 +12,9 @@ export interface DraftInsert {
   hashtags: string[]
   platforms: ('instagram' | 'facebook')[]
   scheduled_at?: string | null
+  carousel?: boolean
+  image_urls?: string[]
+  edited_image_urls?: string[]
 }
 
 export async function POST(req: Request) {
@@ -42,6 +45,9 @@ export async function POST(req: Request) {
     platforms: d.platforms,
     status: 'draft',
     scheduled_at: d.scheduled_at ?? null,
+    carousel: d.carousel ?? false,
+    image_urls: d.image_urls ?? [],
+    edited_image_urls: d.edited_image_urls ?? [],
   }))
 
   const supabase = createAdminClient()

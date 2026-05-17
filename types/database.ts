@@ -3,7 +3,7 @@
 
 export type PostStatus = 'draft' | 'approved' | 'queued' | 'published' | 'failed'
 export type Platform = 'instagram' | 'facebook' | 'both'
-export type ContentType = 'post' | 'reel' | 'story'
+export type ContentType = 'post' | 'reel' | 'story' | 'carousel'
 
 export interface InspirationCaption {
   caption: string
