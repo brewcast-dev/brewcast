@@ -483,6 +483,9 @@ export default function UploadPage() {
   const [carouselCaption, setCarouselCaption] = useState('')
   const [carouselHashtags, setCarouselHashtags] = useState<string[]>([])
   const [carouselPlatforms, setCarouselPlatforms] = useState<('instagram' | 'facebook')[]>(['instagram'])
+  // Pre-generated during the AI pipeline so toggling Carousel is instant.
+  const [carouselSuggestedCaption, setCarouselSuggestedCaption] = useState<string | null>(null)
+  const [carouselSuggestedHashtags, setCarouselSuggestedHashtags] = useState<string[] | null>(null)
   const canvasWorkRef = useRef<HTMLCanvasElement | null>(null)
 
   const togglePhotoSelection = useCallback((name: string) => {
@@ -522,13 +525,15 @@ export default function UploadPage() {
   const toggleCarouselMode = useCallback(() => {
     setCarouselMode((prev) => {
       if (!prev && drafts.length > 0) {
-        setCarouselCaption(drafts[0].caption)
-        setCarouselHashtags(drafts[0].hashtags)
+        // Prefer the pre-generated carousel caption; fall back to draft[0] if
+        // generation hasn't returned yet or failed.
+        setCarouselCaption(carouselSuggestedCaption ?? drafts[0].caption)
+        setCarouselHashtags(carouselSuggestedHashtags ?? drafts[0].hashtags)
         setCarouselPlatforms(drafts[0].platforms)
       }
       return !prev
     })
-  }, [drafts])
+  }, [drafts, carouselSuggestedCaption, carouselSuggestedHashtags])
 
   // ── Apply filter + upload edited image in browser ─────────────────────────
   const renderAndUploadFiltered = useCallback(
@@ -575,18 +580,24 @@ export default function UploadPage() {
     }
 
     setPhase('generating')
+    // Reset carousel state — a fresh run gets a fresh suggested caption.
+    setCarouselMode(false)
+    setCarouselSuggestedCaption(null)
+    setCarouselSuggestedHashtags(null)
 
     const firstStepLabel =
       mode === 'manual'
         ? `Analysing ${targetCount} selected photo${targetCount !== 1 ? 's' : ''}…`
         : 'Scoring photos with Gemini Vision…'
 
+    const carouselStepIdx = targetCount >= 2 ? targetCount + 1 : -1
     const steps = [
       { label: firstStepLabel, done: false },
       ...Array.from({ length: targetCount }, (_, i) => ({
         label: `Generating post ${i + 1}/${targetCount}…`,
         done: false,
       })),
+      ...(carouselStepIdx >= 0 ? [{ label: 'Drafting carousel caption…', done: false }] : []),
       { label: 'Uploading edited images…', done: false },
     ]
     setProgressSteps(steps)
@@ -641,13 +652,43 @@ export default function UploadPage() {
         setActiveStep(i + 2)
       }
 
-      // Final step: upload edited images
-      const withUploads = await Promise.all(
+      // Kick off carousel caption in parallel with image uploads so toggling
+      // Carousel in the review phase is instant. Non-blocking — if it fails,
+      // the toggle falls back to the first per-photo caption.
+      const carouselCaptionPromise: Promise<void> = generated.length >= 2
+        ? fetch('/api/ai/generate-carousel-caption', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ analyses: generated.map((g) => g.analysis) }),
+          })
+            .then(async (res) => {
+              if (res.ok) {
+                const data = await res.json() as CaptionResult
+                setCarouselSuggestedCaption(data.caption)
+                setCarouselSuggestedHashtags(data.hashtags)
+              }
+            })
+            .catch((e) => console.warn('[carousel-caption] failed:', e))
+            .finally(() => {
+              if (carouselStepIdx >= 0) {
+                setProgressSteps((prev) => {
+                  const next = [...prev]
+                  next[carouselStepIdx] = { ...next[carouselStepIdx], done: true }
+                  return next
+                })
+              }
+            })
+        : Promise.resolve()
+
+      // Upload edited images in parallel with the carousel caption request
+      const uploadsPromise = Promise.all(
         generated.map(async (d) => {
           const editedImageUrl = await renderAndUploadFiltered(d)
           return { ...d, editedImageUrl }
         }),
       )
+
+      const [withUploads] = await Promise.all([uploadsPromise, carouselCaptionPromise])
       setProgressSteps((prev) => {
         const next = [...prev]
         next[next.length - 1] = { ...next[next.length - 1], done: true }
