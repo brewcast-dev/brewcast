@@ -17,6 +17,9 @@ import { createAdminClient } from '@/lib/supabase'
 import { createSessionClient } from '@/lib/supabase-server'
 import { getUserConfig, resolveConfig, type ResolvedConfig } from '@/lib/get-user-config'
 import type { Brewery } from '@/types/database'
+import { analyzePhotos, type PhotoAnalysis, PhotoAnalysisSchema } from '@/lib/ai/photo-analysis'
+import { generatePhotoCaption, generateCarouselCaption, DEFAULT_BRAND_CONTEXT } from '@/lib/ai/captions'
+import { publishPost as publishPostToMeta } from '@/lib/publish'
 import ffmpegPath from 'ffmpeg-static'
 import ffmpeg from 'fluent-ffmpeg'
 import fs from 'fs'
@@ -132,16 +135,29 @@ export async function POST(req: Request) {
     `You are BrewCast, a professional social media manager for ${breweryName}.`,
     `Your tone is: ${tone}.`,
     'You help the brewery owner create and publish content for Instagram and Facebook.',
-    'You ask one question at a time. You never overwhelm the user with multiple questions.',
-    'You always confirm before publishing anything.',
-    'You have access to the following tools — use them to get things done.',
-    'After saving a draft, always share the review link: /drafts/[id]',
+    'You have full access to every workflow in the webapp — browsing brewery photos, vision analysis, caption generation, carousel bundling, draft saving, queuing, publishing, and analytics.',
+    '',
+    'BEHAVIOUR — be decisive, not interrogative:',
+    '- Make sensible defaults and act. Do not ask the user permission to perform routine steps like analysing photos, generating captions, or saving drafts.',
+    '- Ask AT MOST ONE clarifying question per request, and only when the answer materially changes what you do.',
+    '- The one question that IS necessary: when a request involves multiple photos and the user has not specified, ask: "Carousel (one post with all images) or separate posts (one per image)?" Then proceed without further questions.',
+    '- Default platform: Instagram only, unless the user mentions Facebook or "both".',
+    '- Default destination: save as draft (do not auto-queue or auto-publish). Only queue or publish when the user explicitly asks.',
+    '- For "pick N best photos" requests: call list_brewery_photos, then analyze_brewery_photos on the whole set, then pick the top N by score yourself — do not ask the user to choose.',
+    '- ALWAYS confirm with a one-line "publish this now? yes/no" before calling publish_post or publish_upload_draft_now.',
+    '',
+    'WORKFLOWS — common patterns:',
+    '- "Generate N posts from my photos": list_brewery_photos → analyze_brewery_photos → pick top N → generate_photo_captions → save_upload_drafts (carousel: false). Share the /drafts link.',
+    '- "Make a carousel from my photos" (or N>=2 selected): list_brewery_photos → analyze_brewery_photos on the chosen photos → generate_carousel_caption → save_upload_drafts (carousel: true, single entry containing all image_urls).',
+    '- "Publish the carousel I just made": list_upload_drafts → publish_upload_draft_now with the matching draft id.',
     '',
     'CRITICAL ID RULES — read carefully:',
-    '- `post_id` is ALWAYS the UUID primary key from the local Supabase `posts` table (looks like `f47ac10b-58cc-4372-a567-0e02b2c3d479`).',
-    '- `meta_post_id` is the long numeric Instagram/Facebook ID (looks like `18078147443553005`) — NEVER pass this as a post_id.',
-    '- Before calling publish_post, ALWAYS call list_posts first to get the correct UUIDs. Do not guess or reuse IDs from earlier in the conversation.',
-    '- To publish many posts at once, call list_posts(status="queued") then publish_post for each returned UUID, one by one.',
+    '- `post_id` is the UUID from the `posts` table. `draft_id` is the UUID from the `drafts` table. They are different tables.',
+    '- `meta_post_id` is the long numeric Instagram/Facebook ID — NEVER pass it as either post_id or draft_id.',
+    '- Before publish_post, call list_posts to get the correct UUID. Before publish_upload_draft_now, call list_upload_drafts.',
+    '- Never guess or reuse IDs from earlier in the conversation if the user did something in between that could have changed state.',
+    '',
+    'After saving drafts, share the link: /drafts (the list) or /drafts/[id] for a specific one.',
   ].join('\n')
 
   const modelMessages = await convertToModelMessages(body.messages)
@@ -151,12 +167,33 @@ export async function POST(req: Request) {
     middleware: createFallbackMiddleware(fallbackModels),
   })
 
+  // Per-user AI providers passed to the photo/caption libs (separate instances
+  // from `googleProvider` so that lib code stays decoupled from the chat model).
+  const aiProviders = {
+    google: googleProvider,
+    groq: groqProvider,
+    mistral: mistralProvider,
+  }
+
+  const brandContext = config.brandContext ?? DEFAULT_BRAND_CONTEXT
+
   const result = streamText({
     model,
     system: systemPrompt,
     messages: modelMessages,
-    stopWhen: stepCountIs(10),
-    tools: buildTools({ supabase, brewery, breweryName, igHandle, tone, config, googleProvider, userId: user.id }),
+    stopWhen: stepCountIs(30),
+    tools: buildTools({
+      supabase,
+      brewery,
+      breweryName,
+      igHandle,
+      tone,
+      config,
+      googleProvider,
+      userId: user.id,
+      aiProviders,
+      brandContext,
+    }),
   })
 
   return result.toUIMessageStreamResponse()
@@ -230,8 +267,17 @@ function buildTools(ctx: {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   googleProvider: any
   userId: string
+  aiProviders: {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    google: any
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    groq: any
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    mistral: any
+  }
+  brandContext: string
 }) {
-  const { supabase, config, googleProvider, userId } = ctx
+  const { supabase, config, googleProvider, userId, aiProviders, brandContext } = ctx
 
   return {
     // ── 1. get_brewery_profile ──────────────────────────────────────────────
@@ -1038,6 +1084,372 @@ function buildTools(ctx: {
         } catch (err) {
           return { error: (err as Error).message }
         }
+      },
+    }),
+
+    // ── 12. list_brewery_photos ─────────────────────────────────────────────
+    list_brewery_photos: tool({
+      description:
+        'List the brewery photo library (Supabase `brewery-photos` bucket, with local fallback). ' +
+        'Returns name + public URL for each photo. Use this as the first step of any photo-based workflow.',
+      inputSchema: z.object({
+        limit: z.number().int().min(1).max(100).default(50).optional(),
+      }),
+      execute: async ({ limit }) => {
+        const cap = limit ?? 50
+        const photos: Array<{ name: string; url: string; source: 'supabase' | 'local' }> = []
+
+        try {
+          const { data, error } = await supabase.storage
+            .from('brewery-photos')
+            .list('', { limit: cap, sortBy: { column: 'created_at', order: 'desc' } })
+          if (!error && data) {
+            for (const file of data) {
+              if (!file.name.match(/\.(jpg|jpeg|png|webp|gif)$/i)) continue
+              const { data: urlData } = supabase.storage.from('brewery-photos').getPublicUrl(file.name)
+              photos.push({ name: file.name, url: urlData.publicUrl, source: 'supabase' })
+            }
+          }
+        } catch (err) {
+          console.warn('[list_brewery_photos] Supabase failed, trying local:', err)
+        }
+
+        if (photos.length === 0) {
+          const localDir = process.env.BREWERY_PHOTOS_DIR ?? path.join(process.cwd(), 'public', 'brewery-photos')
+          if (fs.existsSync(localDir)) {
+            for (const file of fs.readdirSync(localDir).slice(0, cap)) {
+              if (!file.match(/\.(jpg|jpeg|png|webp|gif)$/i)) continue
+              photos.push({ name: file, url: `/brewery-photos/${file}`, source: 'local' })
+            }
+          }
+        }
+
+        return { count: photos.length, photos }
+      },
+    }),
+
+    // ── 13. analyze_brewery_photos ──────────────────────────────────────────
+    analyze_brewery_photos: tool({
+      description:
+        'Run vision analysis on one or more brewery photos (Gemini → Groq → Mistral fallback). ' +
+        'Returns mood, subjects, suggested filter, visual quality score (0-100), and a one-line description for each photo. ' +
+        'Use the scores to pick the best N photos when the user asks for a count.',
+      inputSchema: z.object({
+        image_urls: z.array(z.string()).min(1).max(20).describe('Public photo URLs from list_brewery_photos'),
+      }),
+      execute: async ({ image_urls }) => {
+        const results = await analyzePhotos(image_urls, aiProviders, 3)
+        return {
+          count: results.length,
+          results: results.map((r) => 'analysis' in r
+            ? { imageUrl: r.imageUrl, ...r.analysis }
+            : { imageUrl: r.imageUrl, error: r.error }),
+        }
+      },
+    }),
+
+    // ── 14. generate_photo_captions ─────────────────────────────────────────
+    generate_photo_captions: tool({
+      description:
+        'Generate a per-photo Instagram caption + hashtags for each PhotoAnalysis. ' +
+        'Use for non-carousel posts. For a single carousel, use generate_carousel_caption instead.',
+      inputSchema: z.object({
+        analyses: z.array(PhotoAnalysisSchema).min(1).max(20),
+        brewery_concepts: z.array(z.string()).optional().describe('Optional extra context (beer names, events, etc.)'),
+      }),
+      execute: async ({ analyses, brewery_concepts }) => {
+        const results = await Promise.all(
+          analyses.map(async (analysis: PhotoAnalysis, i: number) => {
+            try {
+              const cap = await generatePhotoCaption(analysis, aiProviders, brandContext, brewery_concepts)
+              return { index: i, caption: cap.caption, hashtags: cap.hashtags }
+            } catch (err) {
+              return { index: i, error: (err as Error).message }
+            }
+          }),
+        )
+        return { count: results.length, captions: results }
+      },
+    }),
+
+    // ── 15. generate_carousel_caption ───────────────────────────────────────
+    generate_carousel_caption: tool({
+      description:
+        'Generate a single Instagram carousel caption that ties together a set of 2-10 photos. ' +
+        'Frames the whole sequence as a story / swipe-through, not a per-image description.',
+      inputSchema: z.object({
+        analyses: z.array(PhotoAnalysisSchema).min(2).max(10),
+        brewery_concepts: z.array(z.string()).optional(),
+      }),
+      execute: async ({ analyses, brewery_concepts }) => {
+        try {
+          const result = await generateCarouselCaption(analyses, aiProviders, brandContext, brewery_concepts)
+          return result
+        } catch (err) {
+          return { error: (err as Error).message }
+        }
+      },
+    }),
+
+    // ── 16. save_upload_drafts ──────────────────────────────────────────────
+    save_upload_drafts: tool({
+      description:
+        'Save one or more drafts to the `drafts` table (the table backing the /upload + /drafts pages). ' +
+        'Each draft becomes one row. For a CAROUSEL, pass ONE draft with carousel=true and image_urls containing 2-10 URLs. ' +
+        'For separate posts, pass MULTIPLE drafts each with carousel=false (or omitted) and a single image_url. ' +
+        'Returns the new draft IDs.',
+      inputSchema: z.object({
+        drafts: z.array(z.object({
+          image_url: z.string().describe('Primary/thumbnail image URL (first image for carousels)'),
+          caption: z.string(),
+          hashtags: z.array(z.string()).default([]),
+          platforms: z.array(z.enum(['instagram', 'facebook'])).default(['instagram']),
+          filter_applied: z.string().default('original'),
+          edited_image_url: z.string().optional(),
+          carousel: z.boolean().default(false),
+          image_urls: z.array(z.string()).default([]).describe('All image URLs when carousel=true (2-10)'),
+          edited_image_urls: z.array(z.string()).default([]),
+          scheduled_at: z.string().optional().describe('ISO 8601; omit for draft state'),
+        })).min(1).max(10),
+      }),
+      execute: async ({ drafts }) => {
+        const rows = drafts.map((d) => ({
+          brewery_id: 'district6',
+          user_id: userId,
+          image_url: d.image_url,
+          edited_image_url: d.edited_image_url ?? null,
+          filter_applied: d.filter_applied,
+          caption: d.caption,
+          hashtags: d.hashtags,
+          platforms: d.platforms,
+          status: d.scheduled_at ? 'queued' : 'draft',
+          scheduled_at: d.scheduled_at ?? null,
+          carousel: d.carousel,
+          image_urls: d.image_urls,
+          edited_image_urls: d.edited_image_urls,
+        }))
+
+        const { data, error } = await supabase.from('drafts').insert(rows).select('id, carousel')
+        if (error) return { error: error.message }
+
+        const items = (data ?? []) as Array<{ id: string; carousel: boolean }>
+        return {
+          count: items.length,
+          drafts: items.map((r) => ({
+            draft_id: r.id,
+            carousel: r.carousel,
+            review_url: `/drafts/${r.id}`,
+          })),
+          listing_url: '/drafts',
+        }
+      },
+    }),
+
+    // ── 17. list_upload_drafts ──────────────────────────────────────────────
+    list_upload_drafts: tool({
+      description:
+        'List rows from the `drafts` table (the upload-flow drafts, separate from `posts`). ' +
+        'Returns draft id, carousel flag, image count, caption preview, status, scheduled_at.',
+      inputSchema: z.object({
+        status: z.enum(['draft', 'approved', 'queued', 'published', 'failed']).optional(),
+        include_archived: z.boolean().default(false),
+        limit: z.number().int().min(1).max(50).default(20).optional(),
+      }),
+      execute: async ({ status, include_archived, limit }) => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        let query: any = supabase
+          .from('drafts')
+          .select('id, caption, carousel, image_url, image_urls, platforms, status, scheduled_at, archived_at, created_at')
+          .order('created_at', { ascending: false })
+          .limit(limit ?? 20)
+        if (status) query = query.eq('status', status)
+        if (!include_archived) query = query.is('archived_at', null)
+        const { data, error } = await query
+        if (error) return { error: error.message }
+        const rows = (data ?? []) as Array<{
+          id: string
+          caption: string | null
+          carousel: boolean
+          image_url: string
+          image_urls: string[] | null
+          platforms: string[] | null
+          status: string
+          scheduled_at: string | null
+          archived_at: string | null
+          created_at: string
+        }>
+        return {
+          count: rows.length,
+          drafts: rows.map((r) => ({
+            id: r.id,
+            carousel: r.carousel,
+            image_count: r.carousel ? (r.image_urls?.length ?? 0) : 1,
+            thumbnail_url: r.image_url,
+            caption_preview: r.caption ? r.caption.slice(0, 100) + (r.caption.length > 100 ? '…' : '') : null,
+            platforms: r.platforms,
+            status: r.status,
+            scheduled_at: r.scheduled_at,
+            review_url: `/drafts/${r.id}`,
+          })),
+        }
+      },
+    }),
+
+    // ── 18. queue_upload_draft ──────────────────────────────────────────────
+    queue_upload_draft: tool({
+      description:
+        'Schedule an upload-flow draft to publish at a specific time. Converts the draft into a post row, sets ' +
+        'content_type to "carousel" if the draft is a carousel, and adds it to the publish queue. ' +
+        'Use list_upload_drafts first to get the draft_id.',
+      inputSchema: z.object({
+        draft_id: z.string().uuid(),
+        scheduled_at: z.string().describe('ISO 8601 datetime'),
+      }),
+      execute: async ({ draft_id, scheduled_at }) => {
+        const { data: draftData, error: fetchErr } = await supabase
+          .from('drafts').select('*').eq('id', draft_id).single()
+        if (fetchErr || !draftData) return { error: fetchErr?.message ?? 'Draft not found' }
+        const draft = draftData as {
+          image_url: string
+          edited_image_url: string | null
+          caption: string
+          hashtags: string[]
+          platforms: string[]
+          carousel: boolean
+          image_urls: string[]
+          edited_image_urls: string[]
+        }
+
+        const isCarousel = draft.carousel && draft.image_urls?.length >= 2
+        const mediaUrls = isCarousel
+          ? (draft.edited_image_urls?.length === draft.image_urls.length ? draft.edited_image_urls : draft.image_urls)
+          : [(draft.edited_image_url ?? draft.image_url)]
+
+        const ig = draft.platforms?.includes('instagram')
+        const fb = draft.platforms?.includes('facebook')
+        const platform = ig && fb ? 'both' : fb ? 'facebook' : 'instagram'
+
+        const captionWithTags = draft.hashtags?.length
+          ? `${draft.caption}\n\n${draft.hashtags.map(h => h.startsWith('#') ? h : `#${h}`).join(' ')}`
+          : draft.caption
+
+        const { data: postData, error: insertErr } = await supabase
+          .from('posts').insert({
+            status: 'queued',
+            user_id: userId,
+            platform,
+            content_type: isCarousel ? 'carousel' : 'post',
+            caption: captionWithTags,
+            media_urls: mediaUrls,
+            thumbnail_url: mediaUrls[0],
+            scheduled_at,
+          }).select('id').single()
+        if (insertErr || !postData) return { error: insertErr?.message ?? 'Failed to create post' }
+
+        await supabase
+          .from('drafts')
+          .update({ status: 'queued', scheduled_at, archived_at: new Date().toISOString() })
+          .eq('id', draft_id)
+
+        return {
+          ok: true,
+          post_id: (postData as { id: string }).id,
+          scheduled_at,
+          message: `Queued for ${scheduled_at}. The scheduler will publish it automatically.`,
+        }
+      },
+    }),
+
+    // ── 19. publish_upload_draft_now ────────────────────────────────────────
+    publish_upload_draft_now: tool({
+      description:
+        'Publish an upload-flow draft to Meta immediately (Instagram, plus Facebook if the draft has it). ' +
+        'Converts the draft into a post row, handles carousel vs single image, and publishes via the Meta Graph API. ' +
+        'CONFIRM with the user before calling this — it goes live on the brewery\'s real Instagram account.',
+      inputSchema: z.object({
+        draft_id: z.string().uuid(),
+      }),
+      execute: async ({ draft_id }) => {
+        const { data: draftData, error: fetchErr } = await supabase
+          .from('drafts').select('*').eq('id', draft_id).single()
+        if (fetchErr || !draftData) return { error: fetchErr?.message ?? 'Draft not found' }
+        const draft = draftData as {
+          image_url: string
+          edited_image_url: string | null
+          caption: string
+          hashtags: string[]
+          platforms: string[]
+          carousel: boolean
+          image_urls: string[]
+          edited_image_urls: string[]
+        }
+
+        const isCarousel = draft.carousel && draft.image_urls?.length >= 2
+        const mediaUrls = isCarousel
+          ? (draft.edited_image_urls?.length === draft.image_urls.length ? draft.edited_image_urls : draft.image_urls)
+          : [(draft.edited_image_url ?? draft.image_url)]
+
+        const ig = draft.platforms?.includes('instagram')
+        const fb = draft.platforms?.includes('facebook')
+        const platform = ig && fb ? 'both' : fb ? 'facebook' : 'instagram'
+
+        const captionWithTags = draft.hashtags?.length
+          ? `${draft.caption}\n\n${draft.hashtags.map(h => h.startsWith('#') ? h : `#${h}`).join(' ')}`
+          : draft.caption
+
+        const { data: postData, error: insertErr } = await supabase
+          .from('posts').insert({
+            status: 'queued',
+            user_id: userId,
+            platform,
+            content_type: isCarousel ? 'carousel' : 'post',
+            caption: captionWithTags,
+            media_urls: mediaUrls,
+            thumbnail_url: mediaUrls[0],
+            scheduled_at: new Date().toISOString(),
+          }).select('id').single()
+        if (insertErr || !postData) return { error: insertErr?.message ?? 'Failed to create post' }
+
+        const newPostId = (postData as { id: string }).id
+
+        await supabase
+          .from('drafts')
+          .update({ status: 'published', archived_at: new Date().toISOString() })
+          .eq('id', draft_id)
+
+        try {
+          const credentials = {
+            igUserId: config.metaIgUserId,
+            accessToken: config.metaAccessToken,
+            fbPageId: config.metaFbPageId,
+          }
+          const result = await publishPostToMeta(supabase, newPostId, { allowAnyStatus: true, credentials })
+          return {
+            ok: true,
+            post_id: newPostId,
+            meta_post_ids: result.metaPostIds,
+            review_url: `/drafts/${newPostId}`,
+          }
+        } catch (err) {
+          return { error: (err as Error).message, post_id: newPostId }
+        }
+      },
+    }),
+
+    // ── 20. archive_upload_draft ────────────────────────────────────────────
+    archive_upload_draft: tool({
+      description:
+        'Soft-delete an upload-flow draft (sets archived_at = now). Reversible via restore_upload_draft within 30 days.',
+      inputSchema: z.object({
+        draft_id: z.string().uuid(),
+      }),
+      execute: async ({ draft_id }) => {
+        const { error } = await supabase
+          .from('drafts')
+          .update({ archived_at: new Date().toISOString() })
+          .eq('id', draft_id)
+        if (error) return { error: error.message }
+        return { ok: true, message: 'Draft archived. It will be hard-deleted after 30 days unless restored.' }
       },
     }),
   } as const
