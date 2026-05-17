@@ -118,12 +118,17 @@ export async function publishPost(
       } else if (p.content_type === 'carousel') {
         const mediaUrls = (p.media_urls as string[] | null) ?? []
         if (mediaUrls.length >= 2) {
+          // Create each child container and wait for it to finish processing.
+          // Without polling, Meta silently drops children that aren't FINISHED
+          // when the parent carousel container is created, so only the first
+          // (already-processed) image ends up in the published carousel.
           const children: string[] = []
           for (const imageUrl of mediaUrls) {
             const child = await graphPost(`/${igUserId}/media`, {
               image_url: imageUrl,
               is_carousel_item: 'true',
             })
+            await pollContainer(child.id as string, accessToken)
             children.push(child.id as string)
           }
           const container = await graphPost(`/${igUserId}/media`, {
@@ -131,7 +136,7 @@ export async function publishPost(
             children: children.join(','),
             caption: p.caption ?? '',
           })
-          await new Promise((r) => setTimeout(r, 3000))
+          await pollContainer(container.id as string, accessToken)
           const pub = await graphPost(`/${igUserId}/media_publish`, {
             creation_id: container.id as string,
           })
