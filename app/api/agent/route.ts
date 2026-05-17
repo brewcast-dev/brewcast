@@ -76,23 +76,36 @@ async function tryFallbacksGenerate(params: any, fallbacks: any[]): Promise<any>
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function createFallbackMiddleware(fallbacks: any[]): LanguageModelMiddleware {
+  // Gemini free-tier 429s often say "retry in ~50ms" — a single short backoff
+  // beats falling all the way through to a less-capable model.
+  const retryOnce = async <T>(fn: () => PromiseLike<T>): Promise<T> => {
+    try {
+      return await fn()
+    } catch (err) {
+      if (!is429(err)) throw err
+      console.log('[BrewCast] Gemini 429 — retrying in 1500ms before fallback')
+      await new Promise((r) => setTimeout(r, 1500))
+      return await fn()
+    }
+  }
+
   return {
     specificationVersion: 'v3',
     wrapStream: async ({ doStream, params }) => {
       try {
-        return await doStream()
+        return await retryOnce(doStream)
       } catch (err) {
         if (!is429(err)) throw err
-        console.log('[BrewCast] Gemini 429 — trying fallback chain: Groq → Mistral')
+        console.log('[BrewCast] Gemini 429 after retry — trying fallback chain: Groq 70b → Mistral')
         return tryFallbacksStream(params, fallbacks)
       }
     },
     wrapGenerate: async ({ doGenerate, params }) => {
       try {
-        return await doGenerate()
+        return await retryOnce(doGenerate)
       } catch (err) {
         if (!is429(err)) throw err
-        console.log('[BrewCast] Gemini 429 on generate — trying fallback chain: Groq → Mistral')
+        console.log('[BrewCast] Gemini 429 on generate after retry — trying fallback chain: Groq 70b → Mistral')
         return tryFallbacksGenerate(params, fallbacks)
       }
     },
@@ -114,11 +127,10 @@ export async function POST(req: Request) {
   const groqProvider = createGroq({ apiKey: config.groqApiKey })
   const mistralProvider = createMistral({ apiKey: config.mistralApiKey })
 
-  // Fallbacks ordered by per-minute token capacity. Free-tier 70b has only
-  // 12k TPM which a tool-heavy chat blows past trivially, so fall back to the
-  // higher-capacity 8b (30k TPM) when 70b is rate-limited.
+  // Fallbacks — only models reliable for structured tool calling. 8b is
+  // deliberately excluded; it emits tool calls as XML-ish text instead of
+  // real function calls, which breaks every workflow.
   const fallbackModels = [
-    groqProvider('llama-3.1-8b-instant'),
     groqProvider('llama-3.3-70b-versatile'),
     mistralProvider('mistral-small-latest'),
   ]
