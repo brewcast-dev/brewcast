@@ -182,10 +182,23 @@ export async function POST(req: Request) {
     '- list_brewery_photos returns photos PRE-SCORED, SORTED by score (best first). It returns ONLY name/url/score/analyzed — NOT the full analysis. The caption tools fetch stored analyses themselves; you do not need to pass analysis data around.',
     '- generate_photo_captions and generate_carousel_caption both take JUST `photo_urls` (an array of URLs from list_brewery_photos). They look up stored analyses by URL from the brewery_photos registry, falling back to inline vision only if a photo isn\'t scored yet.',
     '- DO NOT call analyze_brewery_photos before captioning — that\'s redundant. Only call it when the user explicitly asks to (re-)analyze or to inspect scores for unscored photos.',
-    '- "Pick best N posts" / "make N posts from my photos": list_brewery_photos(limit=N) → take the URLs → generate_photo_captions(photo_urls=[...]) → save_upload_drafts (carousel: false).',
-    '- "Make a carousel from my photos" / "best N as a carousel": list_brewery_photos(limit=N) → generate_carousel_caption(photo_urls=[...]) → save_upload_drafts (carousel: true, image_urls=[same URLs]).',
+    '- "Pick best N posts" / "make N posts from my photos" (no "carousel" word): list_brewery_photos(limit=N) → generate_photo_captions(photo_urls=[...]) → save_upload_drafts with N entries, each carousel=false and one image_url.',
+    '- "Make a carousel from my photos" / "best N as a carousel" / ANY mention of "carousel": list_brewery_photos(limit=N) → generate_carousel_caption(photo_urls=[...]) → save_upload_drafts with EXACTLY ONE entry: carousel=true, image_urls=[ALL N URLs], image_url=first URL.',
     '- "Publish the carousel I just made": list_upload_drafts → publish_upload_draft_now with the matching draft id.',
     '- "Show me the archive" / "what got published recently": list_brewery_photos(view="archive"). Photos there auto-delete 30 days after publication.',
+    '',
+    'CAROUSEL RULES — read carefully, the user\'s last complaint was about this:',
+    '- If the user mentions "carousel" ANYWHERE in the request, you are in CAROUSEL MODE. Period.',
+    '- In carousel mode: ONE call to generate_carousel_caption (NOT generate_photo_captions). ONE call to save_upload_drafts. ONE entry in the drafts array. ONE publish.',
+    '- DO NOT create individual per-photo drafts as well as a carousel. DO NOT call save_upload_drafts twice in carousel mode. The result on Instagram is duplicate posts.',
+    '- "Write captions" (plural) + "carousel" in the SAME request means ONE caption framing the whole set. Plural is just English — the carousel still gets ONE caption.',
+    '- WRONG: save_upload_drafts({drafts: [{image_url:A,carousel:false}, {image_url:B,carousel:false}]}) when user asked for a carousel.',
+    '- RIGHT: save_upload_drafts({drafts: [{image_url:A, image_urls:[A,B], carousel:true}]}).',
+    '',
+    'PUBLISH RULES — be precise about what gets published:',
+    '- "Publish instantly" / "publish now" applies ONLY to what you just created in THIS turn. Never publish older drafts that happen to exist.',
+    '- Call publish_upload_draft_now EXACTLY ONCE per draft you intend to publish. Never retry it without checking list_upload_drafts first — duplicate calls create duplicate posts on Instagram.',
+    '- If a tool error suggests retrying, call list_upload_drafts first to confirm the draft\'s current status before retrying publish.',
     '',
     'CONTEXT HYGIENE — keep tool inputs small:',
     '- Always pass URLs/IDs between tools, never full analysis objects. Tools fetch what they need from the DB.',
@@ -1321,6 +1334,30 @@ function buildTools(ctx: {
         })).min(1).max(10),
       }),
       execute: async ({ drafts }) => {
+        // Guardrail: detect "carousel + per-photo individuals with same images"
+        // pattern. The model has been known to mix modes, producing duplicate
+        // Instagram posts. Reject the call so the model has to retry cleanly.
+        const carouselUrls = new Set<string>()
+        for (const d of drafts) {
+          if (d.carousel) for (const u of d.image_urls) carouselUrls.add(u)
+        }
+        if (carouselUrls.size > 0) {
+          const offending = drafts.filter((d) => !d.carousel && carouselUrls.has(d.image_url))
+          if (offending.length > 0) {
+            return {
+              error: 'Mixed mode rejected: you cannot save a carousel AND individual drafts containing the same images in one call — that would create duplicate Instagram posts. In carousel mode, pass EXACTLY ONE entry with carousel=true and ALL image URLs in image_urls.',
+              hint: 'If the user said "carousel", drop the individual entries and keep just the carousel entry.',
+            }
+          }
+          // Also reject if 2+ carousel entries — should always be exactly one.
+          const carouselCount = drafts.filter((d) => d.carousel).length
+          if (carouselCount > 1) {
+            return {
+              error: `Got ${carouselCount} carousel entries in one call. Each save_upload_drafts call should contain AT MOST one carousel entry.`,
+            }
+          }
+        }
+
         const rows = drafts.map((d) => ({
           brewery_id: 'district6',
           user_id: userId,
@@ -1465,7 +1502,7 @@ function buildTools(ctx: {
 
     // ── 19. publish_upload_draft_now ────────────────────────────────────────
     publish_upload_draft_now: tool({
-      description: 'Publish a `drafts` row to Meta NOW. Carousel-aware. CONFIRM with user first — goes live.',
+      description: 'Publish a `drafts` row to Meta NOW. Carousel-aware. CONFIRM with user first — goes live. Idempotent: refuses to re-publish an already-published or archived draft.',
       inputSchema: z.object({
         draft_id: z.string().uuid(),
       }),
@@ -1482,6 +1519,20 @@ function buildTools(ctx: {
           carousel: boolean
           image_urls: string[]
           edited_image_urls: string[]
+          status: string
+          archived_at: string | null
+        }
+
+        // Idempotency: refuse double-publish. If the draft was already
+        // published (or queued/archived from a prior publish attempt), bail
+        // out instead of creating another posts row + another live IG post.
+        if (draft.status === 'published' || draft.status === 'queued' || draft.archived_at) {
+          return {
+            error: 'Draft has already been published or queued. Refusing to publish again to avoid duplicate posts on Instagram.',
+            draft_id,
+            current_status: draft.status,
+            archived_at: draft.archived_at,
+          }
         }
 
         const isCarousel = draft.carousel && draft.image_urls?.length >= 2
