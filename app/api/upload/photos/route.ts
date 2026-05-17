@@ -25,6 +25,7 @@ export async function GET(req: Request) {
 
   const supabase = createAdminClient()
   let photos: BreweryPhoto[] = []
+  let registryFailed = false
 
   // Try the registry first
   try {
@@ -60,10 +61,39 @@ export async function GET(req: Request) {
       publishedAt: r.published_at,
     }))
   } catch (err) {
-    console.warn('[upload/photos] registry query failed:', (err as Error).message)
+    registryFailed = true
+    console.warn('[upload/photos] registry query failed (run migration 008?):', (err as Error).message)
   }
 
-  // Local fallback (dev) — only when registry is empty and we're showing available
+  // Bucket-direct fallback: if the registry is missing (migration not run) or
+  // empty AND we're showing available, list the bucket directly so the page
+  // isn't blank while the background sync catches up.
+  if (photos.length === 0 && view === 'available') {
+    try {
+      const { data, error } = await supabase.storage.from('brewery-photos').list('', {
+        limit: 200,
+        sortBy: { column: 'created_at', order: 'desc' },
+      })
+      if (!error && data) {
+        for (const file of data) {
+          if (!file.name.match(/\.(jpg|jpeg|png|webp|gif)$/i)) continue
+          const { data: urlData } = supabase.storage.from('brewery-photos').getPublicUrl(file.name)
+          photos.push({
+            name: file.name,
+            url: urlData.publicUrl,
+            source: 'supabase',
+            createdAt: file.created_at ?? undefined,
+            score: null,
+            analyzed: false,
+          })
+        }
+      }
+    } catch (err) {
+      if (!registryFailed) console.warn('[upload/photos] bucket list failed:', (err as Error).message)
+    }
+  }
+
+  // Local fallback (dev) — only when both registry and bucket are empty
   if (photos.length === 0 && view === 'available') {
     const localDir = process.env.BREWERY_PHOTOS_DIR ?? path.join(process.cwd(), 'public', 'brewery-photos')
     if (fs.existsSync(localDir)) {

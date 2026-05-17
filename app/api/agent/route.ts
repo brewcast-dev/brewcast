@@ -17,7 +17,7 @@ import { createAdminClient } from '@/lib/supabase'
 import { createSessionClient } from '@/lib/supabase-server'
 import { getUserConfig, resolveConfig, type ResolvedConfig } from '@/lib/get-user-config'
 import type { Brewery } from '@/types/database'
-import { analyzePhotos, type PhotoAnalysis, PhotoAnalysisSchema } from '@/lib/ai/photo-analysis'
+import { analyzePhoto, analyzePhotos, type PhotoAnalysis } from '@/lib/ai/photo-analysis'
 import { generatePhotoCaption, generateCarouselCaption, DEFAULT_BRAND_CONTEXT } from '@/lib/ai/captions'
 import { publishPost as publishPostToMeta } from '@/lib/publish'
 import ffmpegPath from 'ffmpeg-static'
@@ -147,13 +147,17 @@ export async function POST(req: Request) {
     '- ALWAYS confirm with a one-line "publish this now? yes/no" before calling publish_post or publish_upload_draft_now.',
     '',
     'WORKFLOWS — common patterns:',
-    '- list_brewery_photos returns photos PRE-SCORED, SORTED by score (best first), with the full analysis embedded for each analyzed photo. Already-published photos are filtered out by default.',
-    '- The `analysis` field in each photo row IS a PhotoAnalysis object — feed it DIRECTLY into generate_photo_captions or generate_carousel_caption. DO NOT call analyze_brewery_photos for already-scored photos — that re-runs vision AI for no reason and hits rate limits.',
-    '- analyze_brewery_photos is ONLY for photos where analyzed=false (just uploaded, cron hasn\'t scored them yet). If everything in your selection is analyzed, skip the analysis step entirely.',
-    '- "Pick best N posts" / "make N posts from my photos": list_brewery_photos → take the first N → generate_photo_captions with their analyses → save_upload_drafts (carousel: false).',
-    '- "Make a carousel from my photos" / "best N as a carousel": list_brewery_photos → take the first N (N>=2) → generate_carousel_caption with their analyses → save_upload_drafts (carousel: true).',
+    '- list_brewery_photos returns photos PRE-SCORED, SORTED by score (best first). It returns ONLY name/url/score/analyzed — NOT the full analysis. The caption tools fetch stored analyses themselves; you do not need to pass analysis data around.',
+    '- generate_photo_captions and generate_carousel_caption both take JUST `photo_urls` (an array of URLs from list_brewery_photos). They look up stored analyses by URL from the brewery_photos registry, falling back to inline vision only if a photo isn\'t scored yet.',
+    '- DO NOT call analyze_brewery_photos before captioning — that\'s redundant. Only call it when the user explicitly asks to (re-)analyze or to inspect scores for unscored photos.',
+    '- "Pick best N posts" / "make N posts from my photos": list_brewery_photos(limit=N) → take the URLs → generate_photo_captions(photo_urls=[...]) → save_upload_drafts (carousel: false).',
+    '- "Make a carousel from my photos" / "best N as a carousel": list_brewery_photos(limit=N) → generate_carousel_caption(photo_urls=[...]) → save_upload_drafts (carousel: true, image_urls=[same URLs]).',
     '- "Publish the carousel I just made": list_upload_drafts → publish_upload_draft_now with the matching draft id.',
     '- "Show me the archive" / "what got published recently": list_brewery_photos(view="archive"). Photos there auto-delete 30 days after publication.',
+    '',
+    'CONTEXT HYGIENE — keep tool inputs small:',
+    '- Always pass URLs/IDs between tools, never full analysis objects. Tools fetch what they need from the DB.',
+    '- When picking N photos, set limit=N on list_brewery_photos so you don\'t pull more rows than needed.',
     '',
     'CRITICAL ID RULES — read carefully:',
     '- `post_id` is the UUID from the `posts` table. `draft_id` is the UUID from the `drafts` table. They are different tables.',
@@ -257,6 +261,65 @@ function ffmpegRun(cmd: ReturnType<typeof ffmpeg>): Promise<void> {
   return new Promise((resolve, reject) => {
     cmd.on('end', () => resolve()).on('error', reject).run()
   })
+}
+
+/**
+ * For each URL: try the brewery_photos registry first (cheap DB lookup);
+ * if no stored analysis, run vision inline. Keeps caption tool inputs small
+ * (just URLs) while reusing precomputed analyses where possible.
+ */
+async function resolveAnalysesForUrls(
+  supabase: SupabaseClient,
+  urls: string[],
+  providers: {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    google: any
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    groq: any
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    mistral: any
+  },
+): Promise<Array<{ url: string; analysis: PhotoAnalysis } | { url: string; error: string }>> {
+  const { data } = await supabase
+    .from('brewery_photos')
+    .select('url, mood, subjects, suggested_filter, score, confidence, description, analyzed_at')
+    .in('url', urls)
+
+  const byUrl = new Map<string, {
+    mood: string | null
+    subjects: string[] | null
+    suggested_filter: string | null
+    score: number | null
+    confidence: number | null
+    description: string | null
+    analyzed_at: string | null
+  }>()
+  for (const row of ((data ?? []) as Array<{ url: string } & Record<string, unknown>>)) {
+    byUrl.set(row.url, row as never)
+  }
+
+  return Promise.all(urls.map(async (url) => {
+    const stored = byUrl.get(url)
+    if (stored && stored.analyzed_at && stored.mood) {
+      return {
+        url,
+        analysis: {
+          mood: stored.mood,
+          subjects: stored.subjects ?? [],
+          suggestedFilter: (stored.suggested_filter ?? 'original') as PhotoAnalysis['suggestedFilter'],
+          score: stored.score ?? 50,
+          confidence: stored.confidence ?? 0.5,
+          description: stored.description ?? '',
+        },
+      }
+    }
+    try {
+      const analysis = await analyzePhoto(url, providers)
+      return { url, analysis }
+    } catch (err) {
+      return { url, error: (err as Error).message }
+    }
+  }))
 }
 
 // ─── Tool definitions ─────────────────────────────────────────────────────────
@@ -1138,23 +1201,13 @@ function buildTools(ctx: {
           view: viewFilter,
           count: rows.length,
           analyzed_count: rows.filter((r) => r.analyzed_at !== null).length,
+          // Slim payload: only the fields the AI needs to pick photos.
+          // The caption tools look up the full analysis from the DB by URL.
           photos: rows.map((r) => ({
             name: r.name,
             url: r.url,
             score: r.score,
             analyzed: r.analyzed_at !== null,
-            // Full PhotoAnalysis fields (populated when analyzed=true) — feed
-            // these directly to generate_photo_captions / generate_carousel_caption
-            // without calling analyze_brewery_photos again.
-            analysis: r.analyzed_at !== null ? {
-              mood: r.mood,
-              subjects: r.subjects ?? [],
-              suggestedFilter: r.suggested_filter,
-              score: r.score,
-              confidence: r.confidence,
-              description: r.description,
-            } : null,
-            published_at: r.published_at,
           })),
         }
       },
@@ -1163,18 +1216,45 @@ function buildTools(ctx: {
     // ── 13. analyze_brewery_photos ──────────────────────────────────────────
     analyze_brewery_photos: tool({
       description:
-        'Run vision analysis on one or more brewery photos (Gemini → Groq → Mistral fallback). ' +
-        'Returns mood, subjects, suggested filter, visual quality score (0-100), and a one-line description for each photo. ' +
-        'Use the scores to pick the best N photos when the user asks for a count.',
+        'Run vision analysis on one or more brewery photos (Gemini → Groq → Mistral fallback) ' +
+        'AND persist the result to brewery_photos for reuse. Use ONLY when the user explicitly ' +
+        'asks to (re-)analyze, or for photos that show analyzed=false in list_brewery_photos. ' +
+        'For caption generation you do NOT need to call this — generate_carousel_caption and ' +
+        'generate_photo_captions look up stored analyses themselves.',
       inputSchema: z.object({
         image_urls: z.array(z.string()).min(1).max(20).describe('Public photo URLs from list_brewery_photos'),
       }),
       execute: async ({ image_urls }) => {
         const results = await analyzePhotos(image_urls, aiProviders, 3)
+        // Persist successful analyses so subsequent caption calls hit the cache.
+        await Promise.all(results.map(async (r) => {
+          if (!('analysis' in r)) return
+          const a = r.analysis
+          await supabase
+            .from('brewery_photos')
+            .update({
+              mood: a.mood,
+              subjects: a.subjects,
+              suggested_filter: a.suggestedFilter,
+              score: Math.round(a.score),
+              confidence: a.confidence,
+              description: a.description,
+              analyzed_at: new Date().toISOString(),
+              analysis_error: null,
+            })
+            .eq('url', r.imageUrl)
+        }))
+        // Slim response: just score + mood + filter. Full analysis is in the
+        // DB; caption tools will fetch it when needed without bloating context.
         return {
           count: results.length,
           results: results.map((r) => 'analysis' in r
-            ? { imageUrl: r.imageUrl, ...r.analysis }
+            ? {
+                imageUrl: r.imageUrl,
+                score: Math.round(r.analysis.score),
+                mood: r.analysis.mood,
+                suggestedFilter: r.analysis.suggestedFilter,
+              }
             : { imageUrl: r.imageUrl, error: r.error }),
         }
       },
@@ -1183,20 +1263,24 @@ function buildTools(ctx: {
     // ── 14. generate_photo_captions ─────────────────────────────────────────
     generate_photo_captions: tool({
       description:
-        'Generate a per-photo Instagram caption + hashtags for each PhotoAnalysis. ' +
+        'Generate a per-photo Instagram caption + hashtags for each photo URL. ' +
+        'Pass the photo URLs from list_brewery_photos — the tool looks up the stored analysis ' +
+        'from the registry (or runs analysis on the fly if a photo isn\'t scored yet). ' +
         'Use for non-carousel posts. For a single carousel, use generate_carousel_caption instead.',
       inputSchema: z.object({
-        analyses: z.array(PhotoAnalysisSchema).min(1).max(20),
-        brewery_concepts: z.array(z.string()).optional().describe('Optional extra context (beer names, events, etc.)'),
+        photo_urls: z.array(z.string()).min(1).max(20).describe('Public photo URLs'),
+        brewery_concepts: z.array(z.string()).optional().describe('Optional extra context (beer names, events)'),
       }),
-      execute: async ({ analyses, brewery_concepts }) => {
+      execute: async ({ photo_urls, brewery_concepts }) => {
+        const analyses = await resolveAnalysesForUrls(supabase, photo_urls, aiProviders)
         const results = await Promise.all(
-          analyses.map(async (analysis: PhotoAnalysis, i: number) => {
+          analyses.map(async (item, i) => {
+            if ('error' in item) return { index: i, photo_url: item.url, error: item.error }
             try {
-              const cap = await generatePhotoCaption(analysis, aiProviders, brandContext, brewery_concepts)
-              return { index: i, caption: cap.caption, hashtags: cap.hashtags }
+              const cap = await generatePhotoCaption(item.analysis, aiProviders, brandContext, brewery_concepts)
+              return { index: i, photo_url: item.url, caption: cap.caption, hashtags: cap.hashtags }
             } catch (err) {
-              return { index: i, error: (err as Error).message }
+              return { index: i, photo_url: item.url, error: (err as Error).message }
             }
           }),
         )
@@ -1207,15 +1291,26 @@ function buildTools(ctx: {
     // ── 15. generate_carousel_caption ───────────────────────────────────────
     generate_carousel_caption: tool({
       description:
-        'Generate a single Instagram carousel caption that ties together a set of 2-10 photos. ' +
-        'Frames the whole sequence as a story / swipe-through, not a per-image description.',
+        'Generate a single Instagram carousel caption that ties together 2-10 photos. ' +
+        'Pass the photo URLs — the tool looks up stored analyses from the registry ' +
+        '(or analyzes on the fly if not yet scored). Returns one caption + hashtags.',
       inputSchema: z.object({
-        analyses: z.array(PhotoAnalysisSchema).min(2).max(10),
+        photo_urls: z.array(z.string()).min(2).max(10),
         brewery_concepts: z.array(z.string()).optional(),
       }),
-      execute: async ({ analyses, brewery_concepts }) => {
+      execute: async ({ photo_urls, brewery_concepts }) => {
         try {
-          const result = await generateCarouselCaption(analyses, aiProviders, brandContext, brewery_concepts)
+          const resolved = await resolveAnalysesForUrls(supabase, photo_urls, aiProviders)
+          const ok = resolved.filter((r): r is { url: string; analysis: PhotoAnalysis } => 'analysis' in r)
+          if (ok.length < 2) {
+            return { error: `Need at least 2 analyzed photos; only ${ok.length} succeeded.` }
+          }
+          const result = await generateCarouselCaption(
+            ok.map((r) => r.analysis),
+            aiProviders,
+            brandContext,
+            brewery_concepts,
+          )
           return result
         } catch (err) {
           return { error: (err as Error).message }
