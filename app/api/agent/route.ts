@@ -114,12 +114,32 @@ export async function POST(req: Request) {
   const groqProvider = createGroq({ apiKey: config.groqApiKey })
   const mistralProvider = createMistral({ apiKey: config.mistralApiKey })
 
+  // Fallbacks ordered by per-minute token capacity. Free-tier 70b has only
+  // 12k TPM which a tool-heavy chat blows past trivially, so fall back to the
+  // higher-capacity 8b (30k TPM) when 70b is rate-limited.
   const fallbackModels = [
+    groqProvider('llama-3.1-8b-instant'),
     groqProvider('llama-3.3-70b-versatile'),
     mistralProvider('mistral-small-latest'),
   ]
 
   const body = (await req.json()) as { messages: UIMessage[] }
+
+  // ── Sliding window over message history ──────────────────────────────────
+  // Cap what we send to the model regardless of localStorage history size.
+  // Keep the very first user message (initial goal) plus the last KEEP_RECENT
+  // messages. Bigger conversations would otherwise blow through every
+  // provider's free-tier TPM ceiling.
+  const KEEP_RECENT = 20
+  let trimmedMessages: UIMessage[] = body.messages
+  if (body.messages.length > KEEP_RECENT + 1) {
+    const firstUserIdx = body.messages.findIndex((m) => m.role === 'user')
+    const head = firstUserIdx >= 0 ? [body.messages[firstUserIdx]] : []
+    const tail = body.messages.slice(-KEEP_RECENT)
+    // Avoid duplicating the head if it's already in the tail
+    trimmedMessages = head[0] && tail.includes(head[0]) ? tail : [...head, ...tail]
+    console.log(`[agent] trimmed history ${body.messages.length} → ${trimmedMessages.length}`)
+  }
 
   const supabase = createAdminClient()
   const { data: brewery } = await supabase
@@ -168,7 +188,7 @@ export async function POST(req: Request) {
     'After saving drafts, share the link: /drafts (the list) or /drafts/[id] for a specific one.',
   ].join('\n')
 
-  const modelMessages = await convertToModelMessages(body.messages)
+  const modelMessages = await convertToModelMessages(trimmedMessages)
 
   const model = wrapLanguageModel({
     model: googleProvider('gemini-2.5-flash'),
@@ -349,8 +369,7 @@ function buildTools(ctx: {
   return {
     // ── 1. get_brewery_profile ──────────────────────────────────────────────
     get_brewery_profile: tool({
-      description:
-        'Read the brewery profile from the database. Call this at the start of each conversation to personalise your responses.',
+      description: 'Read brewery profile from DB (name, tone, ig_handle).',
       inputSchema: z.object({}),
       execute: async () => {
         const { data, error } = await supabase.from('brewery').select('*').single()
@@ -361,9 +380,7 @@ function buildTools(ctx: {
 
     // ── 2. request_media_upload ─────────────────────────────────────────────
     request_media_upload: tool({
-      description:
-        'Get a signed Supabase Storage upload URL so the client can PUT a media file directly. ' +
-        'Accepts: jpg/png/webp (images) and mp4 (video, max 60s). Returns upload URL + public CDN URL.',
+      description: 'Signed Supabase upload URL for jpg/png/webp/mp4. Returns upload_url + public_url.',
       inputSchema: z.object({
         filename: z.string().describe('Original filename, e.g. beer-photo.jpg'),
         content_type: z
@@ -388,9 +405,7 @@ function buildTools(ctx: {
 
     // ── 3. generate_image ───────────────────────────────────────────────────
     generate_image: tool({
-      description:
-        'Generate an image using Pixazo (FLUX Schnell, free tier). ' +
-        'Use square (1080×1080) for posts, portrait (1080×1920) for reels/stories.',
+      description: 'Generate image via Pixazo FLUX Schnell. square=1080² (posts), portrait=1080×1920 (reels/stories).',
       inputSchema: z.object({
         prompt: z.string().describe('Detailed image generation prompt'),
         style: z
@@ -432,10 +447,7 @@ function buildTools(ctx: {
 
     // ── 4. write_caption ────────────────────────────────────────────────────
     write_caption: tool({
-      description:
-        'Write an on-brand social media caption using the brewery tone of voice. ' +
-        'Instagram: max 2200 chars, up to 30 hashtags, emojis encouraged. ' +
-        'Facebook: shorter, more conversational, 1-3 hashtags only.',
+      description: 'Write a brand-voice caption. IG: long+hashtags. FB: short, 1-3 tags.',
       inputSchema: z.object({
         content_type: z.enum(['post', 'reel', 'story']),
         platform: z.enum(['instagram', 'facebook', 'both']),
@@ -463,9 +475,7 @@ function buildTools(ctx: {
 
     // ── 5. generate_voiceover ───────────────────────────────────────────────
     generate_voiceover: tool({
-      description:
-        'Generate a voiceover audio file from a script using Kokoro-82M via Hugging Face. ' +
-        'Returns a public URL to the WAV file and estimated duration.',
+      description: 'TTS voiceover via Kokoro-82M (HF). Returns audio_url + duration.',
       inputSchema: z.object({
         script: z.string().max(2000).describe('Voiceover script (keep under 500 words for best results)'),
       }),
@@ -487,9 +497,7 @@ function buildTools(ctx: {
 
     // ── 6. generate_background_music ───────────────────────────────────────
     generate_background_music: tool({
-      description:
-        'Generate background music using MusicGen Small via Hugging Face. ' +
-        'Returns a public URL to the audio file.',
+      description: 'Background music via MusicGen Small (HF). Returns audio_url.',
       inputSchema: z.object({
         mood: z
           .string()
@@ -518,9 +526,7 @@ function buildTools(ctx: {
 
     // ── 7. compose_reel ─────────────────────────────────────────────────────
     compose_reel: tool({
-      description:
-        'Compose a 9:16 Instagram Reel (1080×1920 MP4) from images, video clips, voiceover, ' +
-        'and background music using FFmpeg. Takes ~30 seconds to render.',
+      description: 'Render a 9:16 reel MP4 from images+clips+VO+music via FFmpeg (~30s).',
       inputSchema: z.object({
         image_urls: z.array(z.string()).describe('Public URLs of images (each shown for 3s with Ken Burns zoom)'),
         video_clip_urls: z
@@ -717,9 +723,7 @@ function buildTools(ctx: {
 
     // ── 8. save_draft ───────────────────────────────────────────────────────
     save_draft: tool({
-      description:
-        'Save the post as a draft in the database. Returns the draft ID and review URL. ' +
-        'Always tell the user: "Your draft is ready — review it here: /drafts/[id]"',
+      description: 'Save a post to the `posts` table. Returns draft_id + review_url.',
       inputSchema: z.object({
         content_type: z.enum(['post', 'reel', 'story']),
         platform: z.enum(['instagram', 'facebook', 'both']),
@@ -785,10 +789,7 @@ function buildTools(ctx: {
 
     // ── 8b. list_posts ──────────────────────────────────────────────────────
     list_posts: tool({
-      description:
-        'List posts from the Supabase posts table. Use this BEFORE publish_post to get the correct UUIDs. ' +
-        'Returns the local UUID id (for publish_post), status, platform, caption preview, and scheduled_at. ' +
-        'Filter by status (e.g. "queued", "draft", "approved", "published") or leave empty for all.',
+      description: 'List `posts` rows. Call before publish_post to get UUIDs. Filter by status.',
       inputSchema: z.object({
         status: z
           .enum(['draft', 'approved', 'queued', 'published', 'failed'])
@@ -833,10 +834,7 @@ function buildTools(ctx: {
 
     // ── 8c. process_queue_now ───────────────────────────────────────────────
     process_queue_now: tool({
-      description:
-        'Manually trigger the queue processor to publish any posts that are queued and past their scheduled_at time. ' +
-        'Use this when the user wants to "publish all queued posts now" — it is the safest way to bulk-publish ' +
-        'because it uses the same code path as the automated scheduler.',
+      description: 'Trigger the queue processor — publishes any queued post past its scheduled_at.',
       inputSchema: z.object({}),
       execute: async () => {
         const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000'
@@ -857,12 +855,7 @@ function buildTools(ctx: {
 
     // ── 9. publish_post ─────────────────────────────────────────────────────
     publish_post: tool({
-      description:
-        'Publish an approved draft to Instagram and/or Facebook via the Meta Graph API. ' +
-        'IMPORTANT: post_id MUST be the local Supabase UUID (e.g. f47ac10b-58cc-4372-a567-0e02b2c3d479), ' +
-        'NOT the Instagram/Facebook media ID (which is a long number like 18078147443553005). ' +
-        'Always call list_posts first to get the correct UUIDs. ' +
-        'Always confirm with the user before calling this tool.',
+      description: 'Publish a `posts` row to Meta. post_id MUST be local UUID from list_posts (not meta_post_id). Confirm with user first.',
       inputSchema: z.object({
         post_id: z
           .string()
@@ -1001,9 +994,7 @@ function buildTools(ctx: {
 
     // ── 10. suggest_ad_targeting ────────────────────────────────────────────
     suggest_ad_targeting: tool({
-      description:
-        'Generate Meta ad targeting recommendations for a post. ' +
-        'Saves targeting config to the database and returns structured JSON for display.',
+      description: 'Generate + save Meta ad targeting JSON for a post.',
       inputSchema: z.object({
         post_id: z.string().uuid().describe('The post ID to generate ad targeting for'),
       }),
@@ -1052,9 +1043,7 @@ function buildTools(ctx: {
 
     // ── 11. fetch_analytics ─────────────────────────────────────────────────
     fetch_analytics: tool({
-      description:
-        'Fetch the latest engagement metrics from Meta Insights API and store them in the database. ' +
-        'Returns a summary of reach, engagement rate, and the top-performing post.',
+      description: 'Pull Meta Insights for the last N days, store in DB, return summary.',
       inputSchema: z.object({
         days: z
           .number()
@@ -1156,11 +1145,7 @@ function buildTools(ctx: {
 
     // ── 12. list_brewery_photos ─────────────────────────────────────────────
     list_brewery_photos: tool({
-      description:
-        'List the brewery photo library from the `brewery_photos` registry. ' +
-        'Results are PRE-SCORED by vision analysis and returned in DESCENDING SCORE ORDER — the first N entries are the best N. ' +
-        'Default view excludes already-published photos. Set view="archive" to see recently-published photos (auto-delete after 30 days). ' +
-        'IMPORTANT: when the user asks to "pick the best N", just take the first N from this list — do NOT call analyze_brewery_photos again, it would waste rate-limit quota on already-scored photos.',
+      description: 'List brewery photos sorted by score desc (best first). Returns name/url/score/analyzed. view="archive" for published ones. Take first N for "best N" — don\'t re-analyze.',
       inputSchema: z.object({
         limit: z.number().int().min(1).max(100).default(50).optional(),
         view: z.enum(['available', 'archive']).default('available').optional(),
@@ -1215,12 +1200,7 @@ function buildTools(ctx: {
 
     // ── 13. analyze_brewery_photos ──────────────────────────────────────────
     analyze_brewery_photos: tool({
-      description:
-        'Run vision analysis on one or more brewery photos (Gemini → Groq → Mistral fallback) ' +
-        'AND persist the result to brewery_photos for reuse. Use ONLY when the user explicitly ' +
-        'asks to (re-)analyze, or for photos that show analyzed=false in list_brewery_photos. ' +
-        'For caption generation you do NOT need to call this — generate_carousel_caption and ' +
-        'generate_photo_captions look up stored analyses themselves.',
+      description: 'Vision-analyze photos and persist to registry. Only use for analyzed=false rows or explicit re-analysis. Caption tools fetch analyses themselves — no need to call this first.',
       inputSchema: z.object({
         image_urls: z.array(z.string()).min(1).max(20).describe('Public photo URLs from list_brewery_photos'),
       }),
@@ -1262,11 +1242,7 @@ function buildTools(ctx: {
 
     // ── 14. generate_photo_captions ─────────────────────────────────────────
     generate_photo_captions: tool({
-      description:
-        'Generate a per-photo Instagram caption + hashtags for each photo URL. ' +
-        'Pass the photo URLs from list_brewery_photos — the tool looks up the stored analysis ' +
-        'from the registry (or runs analysis on the fly if a photo isn\'t scored yet). ' +
-        'Use for non-carousel posts. For a single carousel, use generate_carousel_caption instead.',
+      description: 'Generate per-photo IG captions for each URL. Looks up stored analysis. For non-carousel posts.',
       inputSchema: z.object({
         photo_urls: z.array(z.string()).min(1).max(20).describe('Public photo URLs'),
         brewery_concepts: z.array(z.string()).optional().describe('Optional extra context (beer names, events)'),
@@ -1290,10 +1266,7 @@ function buildTools(ctx: {
 
     // ── 15. generate_carousel_caption ───────────────────────────────────────
     generate_carousel_caption: tool({
-      description:
-        'Generate a single Instagram carousel caption that ties together 2-10 photos. ' +
-        'Pass the photo URLs — the tool looks up stored analyses from the registry ' +
-        '(or analyzes on the fly if not yet scored). Returns one caption + hashtags.',
+      description: 'Generate ONE IG caption for a 2-10 photo carousel. Pass URLs; analyses fetched internally.',
       inputSchema: z.object({
         photo_urls: z.array(z.string()).min(2).max(10),
         brewery_concepts: z.array(z.string()).optional(),
@@ -1320,11 +1293,7 @@ function buildTools(ctx: {
 
     // ── 16. save_upload_drafts ──────────────────────────────────────────────
     save_upload_drafts: tool({
-      description:
-        'Save one or more drafts to the `drafts` table (the table backing the /upload + /drafts pages). ' +
-        'Each draft becomes one row. For a CAROUSEL, pass ONE draft with carousel=true and image_urls containing 2-10 URLs. ' +
-        'For separate posts, pass MULTIPLE drafts each with carousel=false (or omitted) and a single image_url. ' +
-        'Returns the new draft IDs.',
+      description: 'Insert into `drafts` table. CAROUSEL: ONE entry with carousel=true + image_urls[2-10]. SEPARATE: multiple entries each with one image_url. Returns draft_ids.',
       inputSchema: z.object({
         drafts: z.array(z.object({
           image_url: z.string().describe('Primary/thumbnail image URL (first image for carousels)'),
@@ -1374,9 +1343,7 @@ function buildTools(ctx: {
 
     // ── 17. list_upload_drafts ──────────────────────────────────────────────
     list_upload_drafts: tool({
-      description:
-        'List rows from the `drafts` table (the upload-flow drafts, separate from `posts`). ' +
-        'Returns draft id, carousel flag, image count, caption preview, status, scheduled_at.',
+      description: 'List `drafts` rows (upload flow). Returns id, carousel, image_count, caption_preview, status.',
       inputSchema: z.object({
         status: z.enum(['draft', 'approved', 'queued', 'published', 'failed']).optional(),
         include_archived: z.boolean().default(false),
@@ -1424,10 +1391,7 @@ function buildTools(ctx: {
 
     // ── 18. queue_upload_draft ──────────────────────────────────────────────
     queue_upload_draft: tool({
-      description:
-        'Schedule an upload-flow draft to publish at a specific time. Converts the draft into a post row, sets ' +
-        'content_type to "carousel" if the draft is a carousel, and adds it to the publish queue. ' +
-        'Use list_upload_drafts first to get the draft_id.',
+      description: 'Schedule a `drafts` row → posts row + publish queue. Carousel-aware. Use list_upload_drafts for draft_id.',
       inputSchema: z.object({
         draft_id: z.string().uuid(),
         scheduled_at: z.string().describe('ISO 8601 datetime'),
@@ -1489,10 +1453,7 @@ function buildTools(ctx: {
 
     // ── 19. publish_upload_draft_now ────────────────────────────────────────
     publish_upload_draft_now: tool({
-      description:
-        'Publish an upload-flow draft to Meta immediately (Instagram, plus Facebook if the draft has it). ' +
-        'Converts the draft into a post row, handles carousel vs single image, and publishes via the Meta Graph API. ' +
-        'CONFIRM with the user before calling this — it goes live on the brewery\'s real Instagram account.',
+      description: 'Publish a `drafts` row to Meta NOW. Carousel-aware. CONFIRM with user first — goes live.',
       inputSchema: z.object({
         draft_id: z.string().uuid(),
       }),
@@ -1565,8 +1526,7 @@ function buildTools(ctx: {
 
     // ── 20. archive_upload_draft ────────────────────────────────────────────
     archive_upload_draft: tool({
-      description:
-        'Soft-delete an upload-flow draft (sets archived_at = now). Reversible via restore_upload_draft within 30 days.',
+      description: 'Soft-delete a `drafts` row (archived_at=now). 30-day window before hard delete.',
       inputSchema: z.object({
         draft_id: z.string().uuid(),
       }),
