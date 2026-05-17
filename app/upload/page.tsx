@@ -472,6 +472,7 @@ export default function UploadPage() {
   const [photos, setPhotos] = useState<BreweryPhoto[]>([])
   const [photosLoading, setPhotosLoading] = useState(true)
   const [photosError, setPhotosError] = useState<string | null>(null)
+  const [libraryView, setLibraryView] = useState<'available' | 'archive'>('available')
   const [postCount, setPostCount] = useState(3)
   const [selectedNames, setSelectedNames] = useState<Set<string>>(new Set())
   const [drafts, setDrafts] = useState<DraftCard[]>([])
@@ -503,10 +504,11 @@ export default function UploadPage() {
     setSelectedNames(new Set())
   }, [])
 
-  // Load photo library on mount
+  // Load photo library on mount (and whenever the view toggle changes)
   useEffect(() => {
     setPhotosLoading(true)
-    fetch('/api/upload/photos')
+    setSelectedNames(new Set())
+    fetch(`/api/upload/photos?view=${libraryView}`)
       .then((r) => r.json())
       .then(({ photos: p }: { photos: BreweryPhoto[] }) => {
         setPhotos(p)
@@ -516,7 +518,7 @@ export default function UploadPage() {
         setPhotosError(String(err))
         setPhotosLoading(false)
       })
-  }, [])
+  }, [libraryView])
 
   const updateDraft = useCallback((id: string, patch: Partial<DraftCard>) => {
     setDrafts((prev) => prev.map((d) => (d.id === id ? { ...d, ...patch } : d)))
@@ -846,16 +848,38 @@ export default function UploadPage() {
 
             {/* Photo library */}
             <div>
-              <div className="flex items-baseline justify-between mb-3">
-                <h2 className="text-sm font-semibold text-bone uppercase tracking-wider">
-                  Photo Library
-                  {!photosLoading && photos.length > 0 && (
-                    <span className="ml-2 text-ash font-normal normal-case">
-                      ({photos.length} photos)
-                    </span>
-                  )}
-                </h2>
-                {mode === 'manual' && selectedNames.size > 0 && (
+              <div className="flex items-baseline justify-between mb-3 gap-3 flex-wrap">
+                <div className="flex items-baseline gap-3">
+                  <h2 className="text-sm font-semibold text-bone uppercase tracking-wider">
+                    {libraryView === 'available' ? 'Photo Library' : 'Archive'}
+                    {!photosLoading && photos.length > 0 && (
+                      <span className="ml-2 text-ash font-normal normal-case">
+                        ({photos.length} photo{photos.length !== 1 ? 's' : ''})
+                      </span>
+                    )}
+                  </h2>
+                  <div className="flex items-center gap-1 rounded-full hairline bg-onyx p-0.5">
+                    <button
+                      type="button"
+                      onClick={() => setLibraryView('available')}
+                      className={`px-3 py-1 rounded-full text-xs transition-colors ${
+                        libraryView === 'available' ? 'bg-cream text-ink' : 'text-ash hover:text-cream'
+                      }`}
+                    >
+                      Available
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setLibraryView('archive')}
+                      className={`px-3 py-1 rounded-full text-xs transition-colors ${
+                        libraryView === 'archive' ? 'bg-cream text-ink' : 'text-ash hover:text-cream'
+                      }`}
+                    >
+                      Archive
+                    </button>
+                  </div>
+                </div>
+                {mode === 'manual' && selectedNames.size > 0 && libraryView === 'available' && (
                   <button
                     onClick={() => setSelectedNames(new Set())}
                     className="text-xs text-ash hover:text-bone transition-colors"
@@ -864,6 +888,11 @@ export default function UploadPage() {
                   </button>
                 )}
               </div>
+              {libraryView === 'archive' && (
+                <p className="text-xs text-smoke mb-3">
+                  Photos used in a published post. Auto-deleted 30 days after publication.
+                </p>
+              )}
 
               {photosLoading && (
                 <div className="flex items-center gap-2 text-ash text-sm">
@@ -891,7 +920,7 @@ export default function UploadPage() {
                 <div className="grid grid-cols-4 sm:grid-cols-6 lg:grid-cols-8 gap-2">
                   {photos.map((photo) => {
                     const isSelected = selectedNames.has(photo.name)
-                    const interactive = mode === 'manual'
+                    const interactive = mode === 'manual' && libraryView === 'available'
                     return (
                       <button
                         key={photo.name}
@@ -904,7 +933,9 @@ export default function UploadPage() {
                           isSelected
                             ? 'border-cream/30 ring-2 ring-amber-500/40'
                             : 'border-white/[0.06] hover:border-white/[0.10]'
-                        } ${interactive ? 'cursor-pointer' : 'cursor-default'}`}
+                        } ${interactive ? 'cursor-pointer' : 'cursor-default'} ${
+                          libraryView === 'archive' ? 'opacity-60' : ''
+                        }`}
                         aria-pressed={interactive ? isSelected : undefined}
                       >
                         {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -915,6 +946,22 @@ export default function UploadPage() {
                             interactive && !isSelected ? 'opacity-80 group-hover:opacity-100' : ''
                           }`}
                         />
+                        {/* Score badge for analyzed photos in the available view */}
+                        {libraryView === 'available' && typeof photo.score === 'number' && (
+                          <div className="absolute top-1.5 left-1.5 z-10 rounded-full bg-black/70 text-cream text-[10px] font-semibold px-1.5 py-0.5 tabular-nums">
+                            {photo.score}
+                          </div>
+                        )}
+                        {libraryView === 'available' && photo.analyzed === false && (
+                          <div className="absolute top-1.5 left-1.5 z-10 rounded-full bg-black/70 text-amber-300 text-[10px] font-semibold px-1.5 py-0.5">
+                            …
+                          </div>
+                        )}
+                        {libraryView === 'archive' && (
+                          <div className="absolute bottom-1.5 left-1.5 z-10 rounded-full bg-black/70 text-cream text-[10px] font-medium px-2 py-0.5">
+                            published
+                          </div>
+                        )}
                         {interactive && (
                           <div
                             className={`absolute top-1.5 right-1.5 w-5 h-5 rounded-full border-2 flex items-center justify-center text-xs font-bold transition-all ${
@@ -972,7 +1019,8 @@ export default function UploadPage() {
                   </div>
                   <button
                     onClick={handleGenerate}
-                    disabled={photos.length === 0 || photosLoading}
+                    disabled={photos.length === 0 || photosLoading || libraryView === 'archive'}
+                    title={libraryView === 'archive' ? 'Switch to Available to generate posts' : undefined}
                     className="px-6 py-2.5 rounded-full bg-cream hover:bg-bone disabled:opacity-40 disabled:cursor-not-allowed text-ink font-medium text-sm transition-colors"
                   >
                     Generate
@@ -995,7 +1043,8 @@ export default function UploadPage() {
 
                 <button
                   onClick={handleGenerate}
-                  disabled={selectedNames.size === 0 || photosLoading}
+                  disabled={selectedNames.size === 0 || photosLoading || libraryView === 'archive'}
+                  title={libraryView === 'archive' ? 'Switch to Available to generate posts' : undefined}
                   className="px-6 py-2.5 rounded-full bg-cream hover:bg-bone disabled:opacity-40 disabled:cursor-not-allowed text-ink font-medium text-sm transition-colors"
                 >
                   Generate {selectedNames.size > 0 && `(${selectedNames.size})`}

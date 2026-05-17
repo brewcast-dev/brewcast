@@ -147,9 +147,13 @@ export async function POST(req: Request) {
     '- ALWAYS confirm with a one-line "publish this now? yes/no" before calling publish_post or publish_upload_draft_now.',
     '',
     'WORKFLOWS — common patterns:',
-    '- "Generate N posts from my photos": list_brewery_photos → analyze_brewery_photos → pick top N → generate_photo_captions → save_upload_drafts (carousel: false). Share the /drafts link.',
-    '- "Make a carousel from my photos" (or N>=2 selected): list_brewery_photos → analyze_brewery_photos on the chosen photos → generate_carousel_caption → save_upload_drafts (carousel: true, single entry containing all image_urls).',
+    '- list_brewery_photos returns photos PRE-SCORED, SORTED by score (best first), with the full analysis embedded for each analyzed photo. Already-published photos are filtered out by default.',
+    '- The `analysis` field in each photo row IS a PhotoAnalysis object — feed it DIRECTLY into generate_photo_captions or generate_carousel_caption. DO NOT call analyze_brewery_photos for already-scored photos — that re-runs vision AI for no reason and hits rate limits.',
+    '- analyze_brewery_photos is ONLY for photos where analyzed=false (just uploaded, cron hasn\'t scored them yet). If everything in your selection is analyzed, skip the analysis step entirely.',
+    '- "Pick best N posts" / "make N posts from my photos": list_brewery_photos → take the first N → generate_photo_captions with their analyses → save_upload_drafts (carousel: false).',
+    '- "Make a carousel from my photos" / "best N as a carousel": list_brewery_photos → take the first N (N>=2) → generate_carousel_caption with their analyses → save_upload_drafts (carousel: true).',
     '- "Publish the carousel I just made": list_upload_drafts → publish_upload_draft_now with the matching draft id.',
+    '- "Show me the archive" / "what got published recently": list_brewery_photos(view="archive"). Photos there auto-delete 30 days after publication.',
     '',
     'CRITICAL ID RULES — read carefully:',
     '- `post_id` is the UUID from the `posts` table. `draft_id` is the UUID from the `drafts` table. They are different tables.',
@@ -1090,41 +1094,69 @@ function buildTools(ctx: {
     // ── 12. list_brewery_photos ─────────────────────────────────────────────
     list_brewery_photos: tool({
       description:
-        'List the brewery photo library (Supabase `brewery-photos` bucket, with local fallback). ' +
-        'Returns name + public URL for each photo. Use this as the first step of any photo-based workflow.',
+        'List the brewery photo library from the `brewery_photos` registry. ' +
+        'Results are PRE-SCORED by vision analysis and returned in DESCENDING SCORE ORDER — the first N entries are the best N. ' +
+        'Default view excludes already-published photos. Set view="archive" to see recently-published photos (auto-delete after 30 days). ' +
+        'IMPORTANT: when the user asks to "pick the best N", just take the first N from this list — do NOT call analyze_brewery_photos again, it would waste rate-limit quota on already-scored photos.',
       inputSchema: z.object({
         limit: z.number().int().min(1).max(100).default(50).optional(),
+        view: z.enum(['available', 'archive']).default('available').optional(),
       }),
-      execute: async ({ limit }) => {
+      execute: async ({ limit, view }) => {
         const cap = limit ?? 50
-        const photos: Array<{ name: string; url: string; source: 'supabase' | 'local' }> = []
+        const viewFilter = view ?? 'available'
 
-        try {
-          const { data, error } = await supabase.storage
-            .from('brewery-photos')
-            .list('', { limit: cap, sortBy: { column: 'created_at', order: 'desc' } })
-          if (!error && data) {
-            for (const file of data) {
-              if (!file.name.match(/\.(jpg|jpeg|png|webp|gif)$/i)) continue
-              const { data: urlData } = supabase.storage.from('brewery-photos').getPublicUrl(file.name)
-              photos.push({ name: file.name, url: urlData.publicUrl, source: 'supabase' })
-            }
-          }
-        } catch (err) {
-          console.warn('[list_brewery_photos] Supabase failed, trying local:', err)
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        let query: any = supabase
+          .from('brewery_photos')
+          .select('name, url, score, mood, subjects, suggested_filter, confidence, description, analyzed_at, published_at, created_at')
+          .order('score', { ascending: false, nullsFirst: false })
+          .order('created_at', { ascending: false })
+          .limit(cap)
+        query = viewFilter === 'archive'
+          ? query.not('published_at', 'is', null)
+          : query.is('published_at', null)
+
+        const { data, error } = await query
+        if (error) return { error: error.message }
+
+        const rows = (data ?? []) as Array<{
+          name: string
+          url: string
+          score: number | null
+          mood: string | null
+          subjects: string[] | null
+          suggested_filter: string | null
+          confidence: number | null
+          description: string | null
+          analyzed_at: string | null
+          published_at: string | null
+          created_at: string
+        }>
+
+        return {
+          view: viewFilter,
+          count: rows.length,
+          analyzed_count: rows.filter((r) => r.analyzed_at !== null).length,
+          photos: rows.map((r) => ({
+            name: r.name,
+            url: r.url,
+            score: r.score,
+            analyzed: r.analyzed_at !== null,
+            // Full PhotoAnalysis fields (populated when analyzed=true) — feed
+            // these directly to generate_photo_captions / generate_carousel_caption
+            // without calling analyze_brewery_photos again.
+            analysis: r.analyzed_at !== null ? {
+              mood: r.mood,
+              subjects: r.subjects ?? [],
+              suggestedFilter: r.suggested_filter,
+              score: r.score,
+              confidence: r.confidence,
+              description: r.description,
+            } : null,
+            published_at: r.published_at,
+          })),
         }
-
-        if (photos.length === 0) {
-          const localDir = process.env.BREWERY_PHOTOS_DIR ?? path.join(process.cwd(), 'public', 'brewery-photos')
-          if (fs.existsSync(localDir)) {
-            for (const file of fs.readdirSync(localDir).slice(0, cap)) {
-              if (!file.match(/\.(jpg|jpeg|png|webp|gif)$/i)) continue
-              photos.push({ name: file, url: `/brewery-photos/${file}`, source: 'local' })
-            }
-          }
-        }
-
-        return { count: photos.length, photos }
       },
     }),
 

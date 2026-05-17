@@ -2,7 +2,11 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase'
 import { getBoss, PUBLISH_QUEUE, type PublishJobData } from '@/lib/queue'
 import { publishPost } from '@/lib/publish'
-import { getMetaCredentialsForUser } from '@/lib/get-user-config'
+import { getMetaCredentialsForUser, resolveConfig } from '@/lib/get-user-config'
+import { syncBucketToRegistry, analyzeUnanalyzed, cleanupArchivedPhotos } from '@/lib/brewery-photos'
+import { createGoogleGenerativeAI } from '@ai-sdk/google'
+import { createGroq } from '@ai-sdk/groq'
+import { createMistral } from '@ai-sdk/mistral'
 
 // Allow up to 60 s — reels need polling for Meta transcoding
 export const maxDuration = 60
@@ -28,7 +32,14 @@ export async function GET(req: NextRequest) {
   }
 
   const supabase = createAdminClient()
-  const results = { processed: 0, failed: 0, purged: 0 }
+  const results = {
+    processed: 0,
+    failed: 0,
+    purged: 0,
+    photos_synced: 0,
+    photos_analyzed: 0,
+    photos_purged: 0,
+  }
 
   // ── 1. pg-boss path ───────────────────────────────────────────────────────
   // Fetch all jobs that have reached their startAfter time (up to 100 at once).
@@ -88,11 +99,25 @@ export async function GET(req: NextRequest) {
     }
   }
 
+  // ── 4. Brewery photos: sync bucket, analyze unanalyzed, cleanup archive ───
+  try {
+    results.photos_synced = await syncBucketToRegistry(supabase)
+    const envConfig = resolveConfig(null)
+    const providers = {
+      google: createGoogleGenerativeAI({ apiKey: envConfig.googleApiKey }),
+      groq: createGroq({ apiKey: envConfig.groqApiKey }),
+      mistral: createMistral({ apiKey: envConfig.mistralApiKey }),
+    }
+    const analysisResult = await analyzeUnanalyzed(supabase, providers, 5)
+    results.photos_analyzed = analysisResult.analyzed
+    results.photos_purged = await cleanupArchivedPhotos(supabase)
+  } catch (err) {
+    console.error('[queue] brewery_photos maintenance failed:', (err as Error).message)
+  }
+
   return NextResponse.json({
     ok: true,
     timestamp: new Date().toISOString(),
-    processed: results.processed,
-    failed: results.failed,
-    purged: results.purged,
+    ...results,
   })
 }

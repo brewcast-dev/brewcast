@@ -1,4 +1,5 @@
 import { createAdminClient } from './supabase'
+import { markPhotosPublished } from './brewery-photos'
 import type { Post } from '@/types/database'
 
 const GRAPH_BASE = 'https://graph.instagram.com/v21.0'
@@ -188,6 +189,15 @@ export async function publishPost(
         meta_post_id: metaPostIds[0] ?? null,
       })
       .eq('id', postId)
+
+    // Mark any brewery_photos rows used by this post as published — they
+    // disappear from /upload and start the 30-day archive clock.
+    const usedUrls = (p.media_urls as string[] | null) ?? []
+    if (usedUrls.length > 0) {
+      await markPhotosPublished(supabase, usedUrls, postId).catch((err) =>
+        console.warn('[publish] markPhotosPublished failed:', (err as Error).message),
+      )
+    }
 
     return { metaPostIds }
   } catch (err) {
