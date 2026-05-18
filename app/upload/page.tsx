@@ -855,7 +855,7 @@ export default function UploadPage() {
       setToast(`Generation failed: ${(err as Error).message}`)
       setPhase('setup')
     }
-  }, [mode, photos, postCount, selectedNames, renderAndUploadFiltered])
+  }, [mode, photos, postCount, selectedNames, renderAndUploadFiltered, designImage])
 
   // ── Save all drafts ────────────────────────────────────────────────────────
   const handleSaveAll = useCallback(async () => {

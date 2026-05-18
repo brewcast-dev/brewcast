@@ -175,7 +175,6 @@ export async function composeDesignedImage(input: DesignInput): Promise<Buffer> 
   // Text block sits near the bottom of the gradient strip with a margin
   const margin = Math.round(W * 0.05)
   const lineHeight = 1.05
-  const totalHeadlineH = headlineLines.length * headlinePx * lineHeight
   const headlineY = preset.gradientPos === 'top'
     ? Math.round(margin + headlinePx)
     : Math.round(H - margin - (input.subhead ? subheadPx + margin * 0.4 : 0))
