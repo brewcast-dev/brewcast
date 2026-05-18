@@ -101,6 +101,10 @@ async function runWithFallback<T>(
       schema,
       system,
       prompt,
+      // Groq's Llama 3.3 70b only supports json_object mode, not json_schema.
+      // 'json' tells the AI SDK to use the looser mode + validate the schema
+      // client-side.
+      mode: 'json',
     })
     return object as T
   } catch (err) {

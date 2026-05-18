@@ -23,7 +23,9 @@ const nextConfig = {
   // ffmpeg-static ships a native binary — exclude from server bundle tracing
   // Next.js 14 uses the experimental key; Next.js 15+ uses serverExternalPackages
   experimental: {
-    serverComponentsExternalPackages: ['fluent-ffmpeg', 'ffmpeg-static', 'pg-boss'],
+    // sharp is a native binary — bundling triggers "Module not found" in dev
+    // when new files import it fresh. Same fix as ffmpeg/pg-boss above.
+    serverComponentsExternalPackages: ['fluent-ffmpeg', 'ffmpeg-static', 'pg-boss', 'sharp'],
   },
   // Silence the "Critical dependency" warning from pg-boss
   webpack(config) {
