@@ -9,6 +9,22 @@ interface MessageBubbleProps {
   onUploadComplete?: (publicUrl: string) => void
 }
 
+// Matches the [Attached photos — work with these URLs ...] block that
+// ChatInterface injects when the user attaches photos via the + button.
+// Captures the URL list so we can render thumbnails and strip the marker
+// from the visible text.
+const ATTACHMENT_MARKER_RE = /^\[Attached photos[^\]]*?:\s*([\s\S]*?)\]\s*\n\n?/
+
+function parseAttachments(text: string): { urls: string[]; rest: string } {
+  const m = text.match(ATTACHMENT_MARKER_RE)
+  if (!m) return { urls: [], rest: text }
+  const urls = m[1]
+    .split(/\s+/)
+    .map((s) => s.trim())
+    .filter((s) => /^https?:\/\//.test(s))
+  return { urls, rest: text.slice(m[0].length) }
+}
+
 export default function MessageBubble({ message, onUploadComplete }: MessageBubbleProps) {
   const isUser = message.role === 'user'
 
@@ -26,18 +42,40 @@ export default function MessageBubble({ message, onUploadComplete }: MessageBubb
           // ── Text part ───────────────────────────────────────────────────────
           if (part.type === 'text') {
             if (!part.text.trim()) return null
+
+            // For user messages, lift any [Attached photos: ...] marker into
+            // a thumbnail strip and render the trimmed text underneath.
+            const { urls: attachedUrls, rest } = isUser
+              ? parseAttachments(part.text)
+              : { urls: [], rest: part.text }
+            const visibleText = rest.trim()
+
             return (
-              <div
-                key={index}
-                className={`rounded-2xl px-4 py-2.5 text-sm leading-relaxed
-                  ${isUser
-                    ? 'bg-cream text-ink rounded-tr-sm'
-                    : 'bg-onyx text-cream rounded-tl-sm'
-                  }`}
-              >
-                {isUser ? (
-                  part.text
-                ) : (
+              <div key={index} className={`flex flex-col gap-2 ${isUser ? 'items-end' : 'items-start'}`}>
+                {attachedUrls.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5 justify-end">
+                    {attachedUrls.map((url) => (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        key={url}
+                        src={url}
+                        alt="attached"
+                        className="w-16 h-16 rounded-lg object-cover border border-white/[0.10]"
+                      />
+                    ))}
+                  </div>
+                )}
+                {(visibleText || attachedUrls.length === 0) && (
+                  <div
+                    className={`rounded-2xl px-4 py-2.5 text-sm leading-relaxed
+                      ${isUser
+                        ? 'bg-cream text-ink rounded-tr-sm'
+                        : 'bg-onyx text-cream rounded-tl-sm'
+                      }`}
+                  >
+                    {isUser ? (
+                      visibleText || part.text
+                    ) : (
                   <ReactMarkdown
                     components={{
                       p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
@@ -74,6 +112,8 @@ export default function MessageBubble({ message, onUploadComplete }: MessageBubb
                   >
                     {part.text}
                   </ReactMarkdown>
+                )}
+                  </div>
                 )}
               </div>
             )

@@ -1,10 +1,12 @@
-﻿'use client'
+'use client'
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useChat } from '@ai-sdk/react'
 import { DefaultChatTransport, type UIMessage } from 'ai'
 import MessageBubble from './MessageBubble'
-import InputBar from './InputBar'
+import InputBar, { type ChatAttachment } from './InputBar'
+import LibraryPicker from './LibraryPicker'
+import type { BreweryPhoto } from '@/app/api/upload/photos/route'
 
 const STORAGE_KEY = 'brewcast_chat'
 
@@ -26,36 +28,33 @@ function saveMessages(messages: UIMessage[]) {
 
 export default function ChatInterface() {
   const [input, setInput] = useState('')
+  const [attachments, setAttachments] = useState<ChatAttachment[]>([])
+  const [pickerOpen, setPickerOpen] = useState(false)
+  const [uploading, setUploading] = useState(false)
   const bottomRef = useRef<HTMLDivElement>(null)
-  // true while we're doing the first localStorage restore — scroll instantly
   const restoringFromStorage = useRef(false)
 
   const { messages, status, sendMessage, stop, setMessages } = useChat({
     id: 'brewcast-main',
-    // No initialMessages here — starting empty ensures server and client render
-    // the same empty state. localStorage is loaded in useEffect below.
     transport: new DefaultChatTransport({ api: '/api/agent' }),
   })
 
   const isStreaming = status === 'streaming' || status === 'submitted'
   const isReady = status === 'ready'
 
-  // Load saved messages after mount — localStorage is only available client-side
   useEffect(() => {
     const saved = loadMessages()
     if (saved.length > 0) {
       restoringFromStorage.current = true
       setMessages(saved)
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // Persist every message change (skips the initial empty render)
   useEffect(() => {
     if (messages.length > 0) saveMessages(messages)
   }, [messages])
 
-  // Scroll to bottom — instant when restoring history, smooth for new messages
   useEffect(() => {
     if (messages.length === 0) return
     const behavior = restoringFromStorage.current ? 'auto' : 'smooth'
@@ -65,14 +64,24 @@ export default function ChatInterface() {
 
   const handleSend = useCallback(() => {
     const text = input.trim()
-    if (!text || isStreaming) return
+    if ((!text && attachments.length === 0) || isStreaming) return
+
+    // Prepend attachment URLs so the agent knows which photos to operate on.
+    // The agent's system prompt looks for this marker and uses these URLs
+    // directly with caption/draft tools, skipping list_brewery_photos.
+    const finalText = attachments.length > 0
+      ? `[Attached photos — work with these URLs (do NOT call list_brewery_photos):\n${attachments.map((a) => a.url).join('\n')}]\n\n${text || 'Please use these photos.'}`
+      : text
+
     setInput('')
-    sendMessage({ text })
-  }, [input, isStreaming, sendMessage])
+    setAttachments([])
+    sendMessage({ text: finalText })
+  }, [input, attachments, isStreaming, sendMessage])
 
   const handleClear = useCallback(() => {
     stop()
     setMessages([])
+    setAttachments([])
     localStorage.removeItem(STORAGE_KEY)
   }, [setMessages, stop])
 
@@ -83,9 +92,55 @@ export default function ChatInterface() {
     [sendMessage],
   )
 
+  const handleRemoveAttachment = useCallback((url: string) => {
+    setAttachments((prev) => prev.filter((a) => a.url !== url))
+  }, [])
+
+  const handleLibraryConfirm = useCallback((picked: BreweryPhoto[]) => {
+    setPickerOpen(false)
+    setAttachments((prev) => {
+      const existing = new Set(prev.map((a) => a.url))
+      const fresh = picked
+        .filter((p) => !existing.has(p.url))
+        .map<ChatAttachment>((p) => ({ url: p.url, name: p.name, source: 'library' }))
+      return [...prev, ...fresh].slice(0, 10)
+    })
+  }, [])
+
+  const handleLocalFiles = useCallback(async (files: File[]) => {
+    const imageFiles = files.filter((f) => f.type.startsWith('image/'))
+    if (imageFiles.length === 0) return
+
+    setUploading(true)
+    const form = new FormData()
+    for (const f of imageFiles) form.append('files', f)
+
+    try {
+      const res = await fetch('/api/upload/photo', { method: 'POST', body: form })
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}))
+        throw new Error((err as { error?: string }).error ?? `HTTP ${res.status}`)
+      }
+      const result = await res.json() as {
+        uploaded: Array<{ url: string; name: string }>
+        failed: Array<{ name: string; error: string }>
+      }
+      setAttachments((prev) => {
+        const existing = new Set(prev.map((a) => a.url))
+        const fresh = result.uploaded
+          .filter((u) => !existing.has(u.url))
+          .map<ChatAttachment>((u) => ({ url: u.url, name: u.name, source: 'upload' }))
+        return [...prev, ...fresh].slice(0, 10)
+      })
+    } catch (err) {
+      console.error('[chat upload]', err)
+    } finally {
+      setUploading(false)
+    }
+  }, [])
+
   return (
     <div className="flex flex-col h-screen overflow-hidden">
-      {/* Page header — global nav lives in the root layout */}
       <header className="flex items-center justify-end px-6 py-2 border-b border-white/[0.06] flex-shrink-0">
         <button
           onClick={handleClear}
@@ -96,8 +151,6 @@ export default function ChatInterface() {
         </button>
       </header>
 
-      {/* Message list — scroll container is full-width so the scrollbar sits
-          flush with the right viewport edge, not inset inside the centered column */}
       <div className="flex-1 overflow-y-auto scrollbar-thin">
         <div className="max-w-3xl mx-auto px-6 py-6 space-y-6">
           {messages.length === 0 ? (
@@ -112,7 +165,6 @@ export default function ChatInterface() {
             ))
           )}
 
-          {/* Typing indicator — three bouncing dots while waiting for first token */}
           {status === 'submitted' && (
             <div className="flex gap-3 justify-start">
               <div className="w-7 h-7 rounded-full bg-cream flex items-center justify-center flex-shrink-0">
@@ -145,12 +197,21 @@ export default function ChatInterface() {
         onStop={stop}
         disabled={!isReady}
         isStreaming={isStreaming}
+        attachments={attachments}
+        onRemoveAttachment={handleRemoveAttachment}
+        onOpenLibrary={() => setPickerOpen(true)}
+        onLocalFiles={handleLocalFiles}
+        uploading={uploading}
+      />
+
+      <LibraryPicker
+        open={pickerOpen}
+        onClose={() => setPickerOpen(false)}
+        onConfirm={handleLibraryConfirm}
       />
     </div>
   )
 }
-
-// ─── Empty state ──────────────────────────────────────────────────────────────
 
 const STARTER_PROMPTS = [
   "Let's create a post for a new beer launch 🍺",
