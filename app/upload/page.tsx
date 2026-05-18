@@ -32,7 +32,13 @@ interface DraftCard {
   hashtags: string[]
   filter: FilterName
   platforms: ('instagram' | 'facebook')[]
-  editedImageUrl?: string
+  editedImageUrl?: string        // Filter-only render (intermediate)
+  designedImageUrl?: string      // Final designed image (filter + overlay layer)
+  designHeadline?: string
+  designSubhead?: string | null
+  designBadge?: string | null
+  designIntensity?: 'subtle' | 'bold' | 'heavy'
+  designing?: boolean            // True while the design step is in flight
 }
 
 type Phase = 'setup' | 'generating' | 'review'
@@ -190,20 +196,50 @@ function PhotoCard({
 
   return (
     <div className="flex flex-col rounded-2xl border border-white/[0.06] bg-obsidian overflow-hidden">
-      {/* Canvas preview */}
+      {/* Preview: designed image (final, with overlay) if available, else canvas filter preview */}
       <div className="relative w-full aspect-square bg-onyx">
-        {!imgLoaded && (
+        {!imgLoaded && !draft.designedImageUrl && (
           <div className="absolute inset-0 flex items-center justify-center">
             <span className="text-ash text-xs">Loading…</span>
           </div>
         )}
-        <canvas
-          ref={canvasRef}
-          className={`w-full h-full object-cover transition-opacity duration-200 ${imgLoaded ? 'opacity-100' : 'opacity-0'}`}
-        />
+        {draft.designedImageUrl ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={draft.designedImageUrl}
+            alt={draft.designHeadline ?? draft.photo.name}
+            className="w-full h-full object-cover"
+          />
+        ) : (
+          <canvas
+            ref={canvasRef}
+            className={`w-full h-full object-cover transition-opacity duration-200 ${imgLoaded ? 'opacity-100' : 'opacity-0'}`}
+          />
+        )}
+        {draft.designing && (
+          <div className="absolute inset-0 flex items-center justify-center bg-black/50">
+            <span className="text-cream text-xs animate-pulse">Designing…</span>
+          </div>
+        )}
+        {draft.designIntensity && (
+          <div className="absolute bottom-1.5 right-1.5 rounded-full bg-black/70 text-cream text-[10px] font-medium px-2 py-0.5 capitalize">
+            {draft.designIntensity}
+          </div>
+        )}
       </div>
 
       <div className="flex flex-col gap-3 p-4">
+        {/* Designed headline preview */}
+        {draft.designHeadline && (
+          <div className="rounded-lg border border-white/[0.06] bg-onyx px-3 py-2">
+            <p className="text-[10px] text-ash uppercase tracking-wider mb-0.5">Headline burned in</p>
+            <p className="text-sm text-cream font-semibold leading-tight">{draft.designHeadline}</p>
+            {draft.designSubhead && (
+              <p className="text-xs text-ash mt-0.5">{draft.designSubhead}</p>
+            )}
+          </div>
+        )}
+
         {/* Filter picker */}
         <div>
           <label className="text-xs text-ash uppercase tracking-wider mb-1 block">Filter</label>
@@ -609,6 +645,36 @@ export default function UploadPage() {
     })
   }, [drafts, carouselSuggestedCaption, carouselSuggestedHashtags])
 
+  // ── Run the AI design pass server-side: returns a fresh JPEG URL with the
+  // headline/subhead/badge/logo composited over the filtered image. ───────────
+  const designImage = useCallback(
+    async (sourceUrl: string): Promise<{
+      url: string
+      headline: string
+      subhead: string | null
+      badge: string | null
+      intensity: 'subtle' | 'bold' | 'heavy'
+    } | null> => {
+      try {
+        const res = await fetch('/api/upload/design', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ imageUrl: sourceUrl, handle: '@district6bangalore' }),
+        })
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}))
+          console.warn('[design] failed:', (err as { error?: string }).error)
+          return null
+        }
+        return await res.json()
+      } catch (err) {
+        console.warn('[design] failed:', (err as Error).message)
+        return null
+      }
+    },
+    [],
+  )
+
   // ── Apply filter + upload edited image in browser ─────────────────────────
   const renderAndUploadFiltered = useCallback(
     async (draft: DraftCard): Promise<string | undefined> => {
@@ -754,11 +820,24 @@ export default function UploadPage() {
             })
         : Promise.resolve()
 
-      // Upload edited images in parallel with the carousel caption request
+      // Upload edited images in parallel with the carousel caption request,
+      // then run the design pass per image (overlay + headline + logo).
       const uploadsPromise = Promise.all(
         generated.map(async (d) => {
           const editedImageUrl = await renderAndUploadFiltered(d)
-          return { ...d, editedImageUrl }
+          // Don't block on design — if it fails, the filtered image still works
+          // and the card falls back to that.
+          let designed = null as Awaited<ReturnType<typeof designImage>>
+          if (editedImageUrl) designed = await designImage(editedImageUrl)
+          return {
+            ...d,
+            editedImageUrl,
+            designedImageUrl: designed?.url,
+            designHeadline: designed?.headline,
+            designSubhead: designed?.subhead ?? null,
+            designBadge: designed?.badge ?? null,
+            designIntensity: designed?.intensity,
+          }
         }),
       )
 
@@ -783,7 +862,8 @@ export default function UploadPage() {
     setSaving(true)
     try {
       if (carouselMode && drafts.length >= 2) {
-        // Bundle all photos into a single carousel draft
+        // Bundle all photos into a single carousel draft. Prefer designed URLs
+        // (filter + overlay) when available; fall back to filter-only.
         const uploadedDrafts = await Promise.all(
           drafts.map(async (d) => {
             let editedUrl = d.editedImageUrl
@@ -795,7 +875,7 @@ export default function UploadPage() {
         )
 
         const imageUrls = uploadedDrafts.map((d) => d.photo.url)
-        const editedImageUrls = uploadedDrafts.map((d) => d.editedImageUrl ?? d.photo.url)
+        const editedImageUrls = uploadedDrafts.map((d) => d.designedImageUrl ?? d.editedImageUrl ?? d.photo.url)
 
         const res = await fetch('/api/drafts/bulk-save', {
           method: 'POST',
@@ -822,7 +902,8 @@ export default function UploadPage() {
 
         setToast(`Carousel draft saved (${drafts.length} images) — opening /drafts…`)
       } else {
-        // Normal mode: one draft per photo
+        // Normal mode: one draft per photo. Prefer the designed URL (filter +
+        // overlay) so the published post uses it; fall back to filter-only.
         const finalized = await Promise.all(
           drafts.map(async (d) => {
             let editedUrl = d.editedImageUrl
@@ -831,7 +912,7 @@ export default function UploadPage() {
             }
             return {
               image_url: d.photo.url,
-              edited_image_url: editedUrl,
+              edited_image_url: d.designedImageUrl ?? editedUrl,
               filter_applied: d.filter,
               caption: d.caption,
               hashtags: d.hashtags,
