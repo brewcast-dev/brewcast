@@ -68,6 +68,7 @@ export async function refreshMetaAnalytics(
   supabase: SupabaseClient,
   creds: MetaCredentials,
   days: number,
+  userId: string,
 ): Promise<{ posts_captured: number; failed: number }> {
   const since = Math.floor(Date.now() / 1000) - days * 86400
   const { igUserId, accessToken } = creds
@@ -102,12 +103,14 @@ export async function refreshMetaAnalytics(
         .from('posts')
         .select('id')
         .eq('meta_post_id', media.id)
+        .eq('user_id', userId)
         .maybeSingle()
 
-      if (!dbPost) continue // Post wasn't published via BrewCast; skip.
+      if (!dbPost) continue // Not this user's post (or not published via BrewCast); skip.
 
       await supabase.from('analytics').insert({
         post_id: (dbPost as { id: string }).id,
+        user_id: userId,
         captured_at: nowIso,
         reach: m.reach ?? 0,
         impressions: m.impressions ?? 0,
@@ -133,10 +136,12 @@ export async function refreshMetaAnalytics(
  */
 export async function shouldRefresh(
   supabase: SupabaseClient,
+  userId: string,
 ): Promise<{ stale: boolean; last_captured_at: string | null }> {
   const { data } = await supabase
     .from('analytics')
     .select('captured_at')
+    .eq('user_id', userId)
     .order('captured_at', { ascending: false })
     .limit(1)
     .maybeSingle()
@@ -157,13 +162,15 @@ export async function shouldRefresh(
 export async function getAnalyticsSummary(
   supabase: SupabaseClient,
   days: number,
+  userId: string,
 ): Promise<AnalyticsSummary> {
   const sinceIso = new Date(Date.now() - days * 86400 * 1000).toISOString()
 
-  // 1. Posts published in window
+  // 1. Posts published in window for this user
   const { data: postsData } = await supabase
     .from('posts')
     .select('id, meta_post_id, caption, platform, content_type, media_urls, thumbnail_url, published_at')
+    .eq('user_id', userId)
     .eq('status', 'published')
     .not('published_at', 'is', null)
     .gte('published_at', sinceIso)

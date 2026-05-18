@@ -193,8 +193,9 @@ export async function publishPost(
     // Mark any brewery_photos rows used by this post as published — they
     // disappear from /upload and start the 30-day archive clock.
     const usedUrls = (p.media_urls as string[] | null) ?? []
-    if (usedUrls.length > 0) {
-      await markPhotosPublished(supabase, usedUrls, postId).catch((err) =>
+    const postOwnerId = (p as Post & { user_id?: string | null }).user_id ?? null
+    if (usedUrls.length > 0 && postOwnerId) {
+      await markPhotosPublished(supabase, usedUrls, postId, postOwnerId).catch((err) =>
         console.warn('[publish] markPhotosPublished failed:', (err as Error).message),
       )
     }

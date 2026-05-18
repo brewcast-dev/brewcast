@@ -51,27 +51,31 @@ function extFromMime(mime: string): string {
 
 async function uploadBuffer(
   supabase: ReturnType<typeof createAdminClient>,
+  userId: string,
   buffer: Buffer,
   filename: string,
   contentType: string,
 ): Promise<{ url: string; name: string }> {
+  // Files are namespaced by user_id so two users uploading the same filename
+  // don't collide, and storage can be browsed per-user.
+  const fullPath = `${userId}/${filename}`
   const { error } = await supabase.storage
     .from(BUCKET)
-    .upload(filename, buffer, { contentType, upsert: false })
+    .upload(fullPath, buffer, { contentType, upsert: false })
   if (error) throw new Error(error.message)
-  const { data: urlData } = supabase.storage.from(BUCKET).getPublicUrl(filename)
+  const { data: urlData } = supabase.storage.from(BUCKET).getPublicUrl(fullPath)
 
   // Insert a registry row so the photo shows up in /upload immediately rather
   // than waiting for the next background sync. Vision analysis still runs in
   // the background — the row starts with score=null and analyzed=false.
   const { error: insertErr } = await supabase
     .from('brewery_photos')
-    .insert({ name: filename, url: urlData.publicUrl })
+    .insert({ name: fullPath, url: urlData.publicUrl, user_id: userId })
   if (insertErr && !insertErr.message.includes('duplicate')) {
     console.warn('[upload/photo] registry insert failed:', insertErr.message)
   }
 
-  return { url: urlData.publicUrl, name: filename }
+  return { url: urlData.publicUrl, name: fullPath }
 }
 
 export async function POST(req: Request) {
@@ -114,7 +118,7 @@ export async function POST(req: Request) {
         }
         const buf = Buffer.from(await file.arrayBuffer())
         const finalName = sanitizeFilename(file.name)
-        const result = await uploadBuffer(supabase, buf, finalName, file.type)
+        const result = await uploadBuffer(supabase, user.id, buf, finalName, file.type)
         uploaded.push(result)
       } catch (err) {
         failed.push({ name: file.name, error: (err as Error).message })
@@ -181,7 +185,7 @@ export async function POST(req: Request) {
   const baseName = filename ?? `import${extFromMime(remoteMime)}`
   const finalName = sanitizeFilename(baseName)
   try {
-    const result = await uploadBuffer(supabase, Buffer.from(ab), finalName, remoteMime)
+    const result = await uploadBuffer(supabase, user.id, Buffer.from(ab), finalName, remoteMime)
     return NextResponse.json({ uploaded: [result], failed: [] })
   } catch (err) {
     return NextResponse.json({ error: (err as Error).message }, { status: 500 })

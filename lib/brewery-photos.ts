@@ -23,19 +23,27 @@ export interface BreweryPhotoRow {
 }
 
 /**
- * Find any files in the bucket that don't have a row yet, and insert them.
+ * Find files in the user's namespace (or legacy root for the demo account)
+ * that don't have a brewery_photos row yet, and insert them.
  * Returns the number of new rows created.
+ *
+ * Lists `<userId>/` prefix in the bucket. Legacy files at the bucket root
+ * already have rows from migration 009's backfill, so we don't list root
+ * here (no user owns "the root namespace" any more).
  */
-export async function syncBucketToRegistry(supabase: SupabaseClient): Promise<number> {
+export async function syncBucketToRegistry(
+  supabase: SupabaseClient,
+  userId: string,
+): Promise<number> {
   let bucketFiles: Array<{ name: string }> = []
   try {
     const { data, error } = await supabase.storage
       .from(BUCKET)
-      .list('', { limit: 1000, sortBy: { column: 'created_at', order: 'desc' } })
+      .list(userId, { limit: 1000, sortBy: { column: 'created_at', order: 'desc' } })
     if (error) throw error
     bucketFiles = (data ?? [])
       .filter((f) => f.name.match(/\.(jpg|jpeg|png|webp|gif)$/i))
-      .map((f) => ({ name: f.name }))
+      .map((f) => ({ name: `${userId}/${f.name}` }))
   } catch (err) {
     console.warn('[brewery-photos] sync — bucket list failed:', (err as Error).message)
     return 0
@@ -43,10 +51,12 @@ export async function syncBucketToRegistry(supabase: SupabaseClient): Promise<nu
 
   if (bucketFiles.length === 0) return 0
 
-  // Find existing names so we only insert new ones
+  // Find existing names within this user's rows so we only insert new ones.
+  // (name is globally unique but we still scope to the user for safety.)
   const { data: existing } = await supabase
     .from('brewery_photos')
     .select('name')
+    .eq('user_id', userId)
     .in('name', bucketFiles.map((f) => f.name))
   const existingNames = new Set(((existing ?? []) as Array<{ name: string }>).map((r) => r.name))
 
@@ -55,6 +65,7 @@ export async function syncBucketToRegistry(supabase: SupabaseClient): Promise<nu
     .map((f) => ({
       name: f.name,
       url: supabase.storage.from(BUCKET).getPublicUrl(f.name).data.publicUrl,
+      user_id: userId,
     }))
 
   if (newRows.length === 0) return 0
@@ -75,12 +86,15 @@ export async function analyzeUnanalyzed(
   supabase: SupabaseClient,
   providers: AnalyzePhotoProviders,
   limit = 5,
+  userId?: string,
 ): Promise<{ analyzed: number; failed: number }> {
-  const { data, error } = await supabase
+  let query = supabase
     .from('brewery_photos')
     .select('id, name, url')
     .is('analyzed_at', null)
     .is('analysis_error', null)
+  if (userId) query = query.eq('user_id', userId)
+  const { data, error } = await query
     .order('created_at', { ascending: true })
     .limit(limit)
 
@@ -133,6 +147,7 @@ export async function markPhotosPublished(
   supabase: SupabaseClient,
   mediaUrls: string[],
   postId: string,
+  userId: string,
 ): Promise<void> {
   if (mediaUrls.length === 0) return
 
@@ -149,7 +164,7 @@ export async function markPhotosPublished(
     .filter(Boolean)
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let query: any = supabase.from('brewery_photos').select('id, used_in_post_ids')
+  let query: any = supabase.from('brewery_photos').select('id, used_in_post_ids').eq('user_id', userId)
   query = query.or(
     `url.in.(${mediaUrls.map((u) => `"${u}"`).join(',')}),name.in.(${names.map((n) => `"${n}"`).join(',')})`,
   )
@@ -176,13 +191,18 @@ export async function markPhotosPublished(
  * Delete brewery_photos rows whose published_at is older than 30 days, and
  * remove the underlying Storage objects. Returns the number deleted.
  */
-export async function cleanupArchivedPhotos(supabase: SupabaseClient): Promise<number> {
+export async function cleanupArchivedPhotos(
+  supabase: SupabaseClient,
+  userId?: string,
+): Promise<number> {
   const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString()
 
-  const { data: rows, error } = await supabase
+  let query = supabase
     .from('brewery_photos')
     .select('id, name')
     .lt('published_at', thirtyDaysAgo)
+  if (userId) query = query.eq('user_id', userId)
+  const { data: rows, error } = await query
 
   if (error) {
     console.error('[brewery-photos] cleanup fetch failed:', error.message)

@@ -26,7 +26,7 @@ export async function GET(req: Request) {
   const days = parseDays(url.searchParams.get('days'))
 
   const supabase = createAdminClient()
-  const summary = await getAnalyticsSummary(supabase, days)
+  const summary = await getAnalyticsSummary(supabase, days, user.id)
   return NextResponse.json(summary)
 }
 
@@ -58,7 +58,7 @@ export async function POST(req: Request) {
   }
 
   if (!force) {
-    const { stale, last_captured_at } = await shouldRefresh(supabase)
+    const { stale, last_captured_at } = await shouldRefresh(supabase, user.id)
     if (!stale) {
       return NextResponse.json({
         skipped: true,
@@ -73,8 +73,9 @@ export async function POST(req: Request) {
       supabase,
       { igUserId, accessToken },
       days,
+      user.id,
     )
-    const summary = await getAnalyticsSummary(supabase, days)
+    const summary = await getAnalyticsSummary(supabase, days, user.id)
     return NextResponse.json({ ...result, summary })
   } catch (err) {
     console.error('[api/analytics] refresh failed:', err)

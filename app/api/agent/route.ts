@@ -332,10 +332,12 @@ async function resolveAnalysesForUrls(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     mistral: any
   },
+  userId: string,
 ): Promise<Array<{ url: string; analysis: PhotoAnalysis } | { url: string; error: string }>> {
   const { data } = await supabase
     .from('brewery_photos')
     .select('url, mood, subjects, suggested_filter, score, confidence, description, analyzed_at')
+    .eq('user_id', userId)
     .in('url', urls)
 
   const byUrl = new Map<string, {
@@ -835,6 +837,7 @@ function buildTools(ctx: {
         let query: any = supabase
           .from('posts')
           .select('id, status, platform, content_type, caption, scheduled_at, created_at, meta_post_id')
+          .eq('user_id', userId)
           .order('created_at', { ascending: false })
           .limit(limit ?? 20)
         if (status) query = query.eq('status', status)
@@ -906,6 +909,7 @@ function buildTools(ctx: {
           .from('posts')
           .select('*')
           .eq('id', post_id)
+          .eq('user_id', userId)
           .single()
 
         if (error || !post) return { error: error?.message ?? 'Post not found' }
@@ -1011,6 +1015,7 @@ function buildTools(ctx: {
               meta_post_id: metaPostIds[0] ?? null,
             })
             .eq('id', post_id)
+            .eq('user_id', userId)
 
           return {
             success: true,
@@ -1019,7 +1024,7 @@ function buildTools(ctx: {
             meta_post_ids: metaPostIds,
           }
         } catch (err) {
-          await supabase.from('posts').update({ status: 'failed' }).eq('id', post_id)
+          await supabase.from('posts').update({ status: 'failed' }).eq('id', post_id).eq('user_id', userId)
           return { error: (err as Error).message }
         }
       },
@@ -1036,6 +1041,7 @@ function buildTools(ctx: {
           .from('posts')
           .select('caption, content_type')
           .eq('id', post_id)
+          .eq('user_id', userId)
           .single()
 
         if (error || !post) return { error: error?.message ?? 'Post not found' }
@@ -1069,6 +1075,7 @@ function buildTools(ctx: {
           .from('posts')
           .update({ ad_targeting: targeting })
           .eq('id', post_id)
+          .eq('user_id', userId)
 
         return targeting
       },
@@ -1091,8 +1098,8 @@ function buildTools(ctx: {
         if (!igUserId || !accessToken) return { error: 'Meta credentials not configured for this account' }
 
         try {
-          const refresh = await refreshMetaAnalytics(supabase, { igUserId, accessToken }, days)
-          const summary = await getAnalyticsSummary(supabase, days)
+          const refresh = await refreshMetaAnalytics(supabase, { igUserId, accessToken }, days, userId)
+          const summary = await getAnalyticsSummary(supabase, days, userId)
           return {
             days_fetched: days,
             posts_analyzed: refresh.posts_captured,
@@ -1122,6 +1129,7 @@ function buildTools(ctx: {
         let query: any = supabase
           .from('brewery_photos')
           .select('name, url, score, mood, subjects, suggested_filter, confidence, description, analyzed_at, published_at, created_at')
+          .eq('user_id', userId)
           .order('score', { ascending: false, nullsFirst: false })
           .order('created_at', { ascending: false })
           .limit(cap)
@@ -1186,6 +1194,7 @@ function buildTools(ctx: {
               analyzed_at: new Date().toISOString(),
               analysis_error: null,
             })
+            .eq('user_id', userId)
             .eq('url', r.imageUrl)
         }))
         // Slim response: just score + mood + filter. Full analysis is in the
@@ -1212,7 +1221,7 @@ function buildTools(ctx: {
         brewery_concepts: z.array(z.string()).optional().describe('Optional extra context (beer names, events)'),
       }),
       execute: async ({ photo_urls, brewery_concepts }) => {
-        const analyses = await resolveAnalysesForUrls(supabase, photo_urls, aiProviders)
+        const analyses = await resolveAnalysesForUrls(supabase, photo_urls, aiProviders, userId)
         const results = await Promise.all(
           analyses.map(async (item, i) => {
             if ('error' in item) return { index: i, photo_url: item.url, error: item.error }
@@ -1237,7 +1246,7 @@ function buildTools(ctx: {
       }),
       execute: async ({ photo_urls, brewery_concepts }) => {
         try {
-          const resolved = await resolveAnalysesForUrls(supabase, photo_urls, aiProviders)
+          const resolved = await resolveAnalysesForUrls(supabase, photo_urls, aiProviders, userId)
           const ok = resolved.filter((r): r is { url: string; analysis: PhotoAnalysis } => 'analysis' in r)
           if (ok.length < 2) {
             return { error: `Need at least 2 analyzed photos; only ${ok.length} succeeded.` }
@@ -1342,6 +1351,7 @@ function buildTools(ctx: {
         let query: any = supabase
           .from('drafts')
           .select('id, caption, carousel, image_url, image_urls, platforms, status, scheduled_at, archived_at, created_at')
+          .eq('user_id', userId)
           .order('created_at', { ascending: false })
           .limit(limit ?? 20)
         if (status) query = query.eq('status', status)
@@ -1386,7 +1396,7 @@ function buildTools(ctx: {
       }),
       execute: async ({ draft_id, scheduled_at }) => {
         const { data: draftData, error: fetchErr } = await supabase
-          .from('drafts').select('*').eq('id', draft_id).single()
+          .from('drafts').select('*').eq('id', draft_id).eq('user_id', userId).single()
         if (fetchErr || !draftData) return { error: fetchErr?.message ?? 'Draft not found' }
         const draft = draftData as {
           image_url: string
@@ -1429,6 +1439,7 @@ function buildTools(ctx: {
           .from('drafts')
           .update({ status: 'queued', scheduled_at, archived_at: new Date().toISOString() })
           .eq('id', draft_id)
+          .eq('user_id', userId)
 
         return {
           ok: true,
@@ -1447,7 +1458,7 @@ function buildTools(ctx: {
       }),
       execute: async ({ draft_id }) => {
         const { data: draftData, error: fetchErr } = await supabase
-          .from('drafts').select('*').eq('id', draft_id).single()
+          .from('drafts').select('*').eq('id', draft_id).eq('user_id', userId).single()
         if (fetchErr || !draftData) return { error: fetchErr?.message ?? 'Draft not found' }
         const draft = draftData as {
           image_url: string
@@ -1506,6 +1517,7 @@ function buildTools(ctx: {
           .from('drafts')
           .update({ status: 'published', archived_at: new Date().toISOString() })
           .eq('id', draft_id)
+          .eq('user_id', userId)
 
         try {
           const credentials = {
@@ -1537,6 +1549,7 @@ function buildTools(ctx: {
           .from('drafts')
           .update({ archived_at: new Date().toISOString() })
           .eq('id', draft_id)
+          .eq('user_id', userId)
         if (error) return { error: error.message }
         return { ok: true, message: 'Draft archived. It will be hard-deleted after 30 days unless restored.' }
       },

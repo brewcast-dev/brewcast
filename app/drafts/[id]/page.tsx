@@ -1,6 +1,7 @@
-import { notFound } from 'next/navigation'
+import { notFound, redirect } from 'next/navigation'
 import Link from 'next/link'
 import { createAdminClient } from '@/lib/supabase'
+import { createSessionClient } from '@/lib/supabase-server'
 import type { Post } from '@/types/database'
 import PostReview from './_components/PostReview'
 import UploadDraftReview, { type UploadDraft } from './_components/UploadDraftReview'
@@ -9,10 +10,19 @@ export const dynamic = 'force-dynamic'
 export const revalidate = 0
 
 export default async function DraftReviewPage({ params }: { params: { id: string } }) {
+  const sessionClient = createSessionClient()
+  const { data: { user } } = await sessionClient.auth.getUser()
+  if (!user) redirect('/login')
+
   const supabase = createAdminClient()
 
-  // Check the legacy `posts` table first
-  const postRes = await supabase.from('posts').select('*').eq('id', params.id).maybeSingle()
+  // Check the legacy `posts` table first — scoped to this user
+  const postRes = await supabase
+    .from('posts')
+    .select('*')
+    .eq('id', params.id)
+    .eq('user_id', user.id)
+    .maybeSingle()
   if (postRes.data) {
     const post = postRes.data as Post
     return (
@@ -23,7 +33,12 @@ export default async function DraftReviewPage({ params }: { params: { id: string
   }
 
   // Otherwise check the new `drafts` table (from /upload flow)
-  const draftRes = await supabase.from('drafts').select('*').eq('id', params.id).maybeSingle()
+  const draftRes = await supabase
+    .from('drafts')
+    .select('*')
+    .eq('id', params.id)
+    .eq('user_id', user.id)
+    .maybeSingle()
   if (draftRes.data) {
     const draft = draftRes.data as UploadDraft
     const platformsLabel = (draft.platforms ?? []).join(' + ')

@@ -1,5 +1,7 @@
 import Link from 'next/link'
+import { redirect } from 'next/navigation'
 import { createAdminClient } from '@/lib/supabase'
+import { createSessionClient } from '@/lib/supabase-server'
 import type { Post } from '@/types/database'
 import DraftCard, { type DraftItem } from './_components/DraftCard'
 
@@ -51,15 +53,19 @@ export default async function DraftsPage({
 }: {
   searchParams: { status?: string }
 }) {
+  const sessionClient = createSessionClient()
+  const { data: { user } } = await sessionClient.auth.getUser()
+  if (!user) redirect('/login')
+
   const supabase = createAdminClient()
   const activeStatus = searchParams.status ?? 'all'
   const isArchiveView = activeStatus === 'archived'
 
-  // ── Fetch from both tables in parallel ─────────────────────────────────────
+  // ── Fetch from both tables in parallel, scoped to this user ─────────────────
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let postsQuery: any = supabase.from('posts').select('*').order('created_at', { ascending: false })
+  let postsQuery: any = supabase.from('posts').select('*').eq('user_id', user.id).order('created_at', { ascending: false })
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let draftsQuery: any = supabase.from('drafts').select('*').order('created_at', { ascending: false })
+  let draftsQuery: any = supabase.from('drafts').select('*').eq('user_id', user.id).order('created_at', { ascending: false })
 
   if (isArchiveView) {
     // Only archived rows

@@ -20,6 +20,10 @@ export interface BreweryPhoto {
 }
 
 export async function GET(req: Request) {
+  const sessionClient = createSessionClient()
+  const { data: { user } } = await sessionClient.auth.getUser()
+  if (!user) return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
+
   const url = new URL(req.url)
   const view = url.searchParams.get('view') === 'archive' ? 'archive' : 'available'
 
@@ -27,12 +31,13 @@ export async function GET(req: Request) {
   let photos: BreweryPhoto[] = []
   let registryFailed = false
 
-  // Try the registry first
+  // Try the registry first — scoped to the current user
   try {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let query: any = supabase
       .from('brewery_photos')
       .select('name, url, score, analyzed_at, published_at, created_at')
+      .eq('user_id', user.id)
       .order('score', { ascending: false, nullsFirst: false })
       .order('created_at', { ascending: false })
       .limit(200)
@@ -66,20 +71,21 @@ export async function GET(req: Request) {
   }
 
   // Bucket-direct fallback: if the registry is missing (migration not run) or
-  // empty AND we're showing available, list the bucket directly so the page
-  // isn't blank while the background sync catches up.
+  // empty AND we're showing available, list the user's namespace in the bucket
+  // directly so the page isn't blank while the background sync catches up.
   if (photos.length === 0 && view === 'available') {
     try {
-      const { data, error } = await supabase.storage.from('brewery-photos').list('', {
+      const { data, error } = await supabase.storage.from('brewery-photos').list(user.id, {
         limit: 200,
         sortBy: { column: 'created_at', order: 'desc' },
       })
       if (!error && data) {
         for (const file of data) {
           if (!file.name.match(/\.(jpg|jpeg|png|webp|gif)$/i)) continue
-          const { data: urlData } = supabase.storage.from('brewery-photos').getPublicUrl(file.name)
+          const path = `${user.id}/${file.name}`
+          const { data: urlData } = supabase.storage.from('brewery-photos').getPublicUrl(path)
           photos.push({
-            name: file.name,
+            name: path,
             url: urlData.publicUrl,
             source: 'supabase',
             createdAt: file.created_at ?? undefined,
@@ -111,22 +117,19 @@ export async function GET(req: Request) {
   }
 
   // Fire-and-forget: sync bucket → registry, then analyze a small batch.
-  // Wrapped so the response isn't blocked.
+  // Wrapped so the response isn't blocked. Both calls are scoped to this user.
   if (view === 'available') {
     void (async () => {
       try {
-        const sessionClient = createSessionClient()
-        const { data: { user } } = await sessionClient.auth.getUser()
-        if (!user) return
         const config = resolveConfig(await getUserConfig(user.id))
         const providers = {
           google: createGoogleGenerativeAI({ apiKey: config.googleApiKey }),
           groq: createGroq({ apiKey: config.groqApiKey }),
           mistral: createMistral({ apiKey: config.mistralApiKey }),
         }
-        const added = await syncBucketToRegistry(supabase)
-        if (added > 0) console.log(`[upload/photos] synced ${added} new photos`)
-        const { analyzed, failed } = await analyzeUnanalyzed(supabase, providers, 3)
+        const added = await syncBucketToRegistry(supabase, user.id)
+        if (added > 0) console.log(`[upload/photos] synced ${added} new photos for ${user.id}`)
+        const { analyzed, failed } = await analyzeUnanalyzed(supabase, providers, 3, user.id)
         if (analyzed + failed > 0) {
           console.log(`[upload/photos] background analyze: ${analyzed} ok, ${failed} failed`)
         }

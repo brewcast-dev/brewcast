@@ -99,9 +99,25 @@ export async function GET(req: NextRequest) {
     }
   }
 
-  // ── 4. Brewery photos: sync bucket, analyze unanalyzed, cleanup archive ───
+  // ── 4. Brewery photos: per-user sync + global analyze + global purge ──────
+  // Per-user bucket sync (each user has their own <user_id>/ prefix).
+  // Analyze + cleanup are global — they iterate any unanalyzed/expired row
+  // regardless of owner, which is fine because the lib functions are scoped
+  // by row id, not by user.
   try {
-    results.photos_synced = await syncBucketToRegistry(supabase)
+    const { data: users } = await supabase.from('allowed_users').select('user_id')
+    const activeUserIds = ((users ?? []) as Array<{ user_id: string | null }>)
+      .filter((u) => u.user_id)
+      .map((u) => u.user_id as string)
+
+    for (const uid of activeUserIds) {
+      try {
+        results.photos_synced += await syncBucketToRegistry(supabase, uid)
+      } catch (err) {
+        console.warn(`[queue] sync for ${uid} failed:`, (err as Error).message)
+      }
+    }
+
     const envConfig = resolveConfig(null)
     const providers = {
       google: createGoogleGenerativeAI({ apiKey: envConfig.googleApiKey }),
