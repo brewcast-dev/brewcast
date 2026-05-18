@@ -196,8 +196,10 @@ function PhotoCard({
 
   return (
     <div className="flex flex-col rounded-2xl border border-white/[0.06] bg-obsidian overflow-hidden">
-      {/* Preview: designed image (final, with overlay) if available, else canvas filter preview */}
-      <div className="relative w-full aspect-square bg-onyx">
+      {/* Preview: designed image (final, with overlay) if available, else canvas filter preview.
+          aspect-[4/5] matches the new design output. Falls back gracefully for older
+          square images. */}
+      <div className="relative w-full aspect-[4/5] bg-onyx">
         {!imgLoaded && !draft.designedImageUrl && (
           <div className="absolute inset-0 flex items-center justify-center">
             <span className="text-ash text-xs">Loading…</span>
@@ -663,12 +665,17 @@ export default function UploadPage() {
         })
         if (!res.ok) {
           const err = await res.json().catch(() => ({}))
-          console.warn('[design] failed:', (err as { error?: string }).error)
+          const msg = (err as { error?: string }).error ?? `HTTP ${res.status}`
+          console.error('[design] FAILED:', msg)
+          // Make this VISIBLE — silent failure was hiding real bugs from the user
+          setToast(`Design step failed: ${msg.slice(0, 120)}`)
           return null
         }
         return await res.json()
       } catch (err) {
-        console.warn('[design] failed:', (err as Error).message)
+        const msg = (err as Error).message
+        console.error('[design] FAILED:', msg)
+        setToast(`Design step failed: ${msg.slice(0, 120)}`)
         return null
       }
     },

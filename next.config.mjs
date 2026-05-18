@@ -26,6 +26,17 @@ const nextConfig = {
     // sharp is a native binary — bundling triggers "Module not found" in dev
     // when new files import it fresh. Same fix as ffmpeg/pg-boss above.
     serverComponentsExternalPackages: ['fluent-ffmpeg', 'ffmpeg-static', 'pg-boss', 'sharp'],
+    // Force Next.js to include the bundled brand assets (fonts, logo) in
+    // the lambda's traced filesystem. Files in public/ are served as static
+    // URLs by default but are NOT included for fs.readFileSync access from
+    // serverless functions unless explicitly listed here. Without this the
+    // design pipeline silently fails on Vercel because text-to-path can't
+    // load the TTFs and the logo composite throws ENOENT.
+    outputFileTracingIncludes: {
+      '/api/upload/design': [
+        './public/brand/**/*',
+      ],
+    },
   },
   // Silence the "Critical dependency" warning from pg-boss
   webpack(config) {
