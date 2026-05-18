@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import type { BreweryPhoto } from '@/app/api/upload/photos/route'
 import type { PhotoAnalysis } from '@/app/api/ai/analyze-photo/route'
 import type { CaptionResult } from '@/app/api/ai/generate-caption/route'
+import PhotoUploader from './_components/PhotoUploader'
 
 // ─── Filter definitions ───────────────────────────────────────────────────────
 
@@ -504,11 +505,11 @@ export default function UploadPage() {
     setSelectedNames(new Set())
   }, [])
 
-  // Load photo library on mount (and whenever the view toggle changes)
-  useEffect(() => {
+  // Load photo library — called on mount, view toggle, and after uploads complete
+  const refreshPhotos = useCallback((view: 'available' | 'archive', opts?: { keepSelection?: boolean }) => {
     setPhotosLoading(true)
-    setSelectedNames(new Set())
-    fetch(`/api/upload/photos?view=${libraryView}`)
+    if (!opts?.keepSelection) setSelectedNames(new Set())
+    fetch(`/api/upload/photos?view=${view}`)
       .then((r) => r.json())
       .then(({ photos: p }: { photos: BreweryPhoto[] }) => {
         setPhotos(p)
@@ -518,7 +519,22 @@ export default function UploadPage() {
         setPhotosError(String(err))
         setPhotosLoading(false)
       })
-  }, [libraryView])
+  }, [])
+
+  useEffect(() => {
+    refreshPhotos(libraryView)
+  }, [libraryView, refreshPhotos])
+
+  const handleUploadsComplete = useCallback((result: { uploaded: Array<{ url: string; name: string }>; failed: Array<{ name: string; error: string }> }) => {
+    if (result.uploaded.length === 0) return
+    if (libraryView !== 'available') setLibraryView('available')
+    else refreshPhotos('available', { keepSelection: true })
+    setToast(
+      result.failed.length > 0
+        ? `${result.uploaded.length} uploaded, ${result.failed.length} failed`
+        : `${result.uploaded.length} photo${result.uploaded.length !== 1 ? 's' : ''} added`,
+    )
+  }, [libraryView, refreshPhotos])
 
   const updateDraft = useCallback((id: string, patch: Partial<DraftCard>) => {
     setDrafts((prev) => prev.map((d) => (d.id === id ? { ...d, ...patch } : d)))
@@ -847,6 +863,7 @@ export default function UploadPage() {
             </div>
 
             {/* Photo library */}
+            <PhotoUploader onUploadsComplete={handleUploadsComplete}>
             <div>
               <div className="flex items-baseline justify-between mb-3 gap-3 flex-wrap">
                 <div className="flex items-baseline gap-3">
@@ -979,6 +996,7 @@ export default function UploadPage() {
                 </div>
               )}
             </div>
+            </PhotoUploader>
 
             {/* Action bar */}
             {mode === 'auto' ? (
