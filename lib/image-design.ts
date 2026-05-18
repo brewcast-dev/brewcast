@@ -1,4 +1,51 @@
 import sharp from 'sharp'
+import fs from 'fs'
+import path from 'path'
+
+// ─── Font embedding ─────────────────────────────────────────────────────────
+// Vercel's serverless runtime has no display fonts installed, so we MUST
+// bundle our own and inline them base64 in the SVG's @font-face. Without
+// this, every <text> element falls back to tofu (▢▢▢) on production.
+//
+// Fonts loaded once at module init and reused across composites.
+
+interface EmbeddedFonts {
+  displayB64: string | null
+  bodyB64: string | null
+}
+
+let _fontsCache: EmbeddedFonts | null = null
+
+function loadEmbeddedFonts(): EmbeddedFonts {
+  if (_fontsCache) return _fontsCache
+  const fontsDir = path.join(process.cwd(), 'public', 'brand', 'fonts')
+  const tryRead = (file: string): string | null => {
+    try {
+      return fs.readFileSync(path.join(fontsDir, file)).toString('base64')
+    } catch {
+      return null
+    }
+  }
+  _fontsCache = {
+    displayB64: tryRead('Anton-Regular.ttf'),
+    bodyB64: tryRead('Inter-Variable.ttf'),
+  }
+  if (!_fontsCache.displayB64 || !_fontsCache.bodyB64) {
+    console.warn('[image-design] Bundled fonts missing — text will tofu on Vercel. Expected public/brand/fonts/{Anton-Regular,Inter-Variable}.ttf')
+  }
+  return _fontsCache
+}
+
+function fontFaceCss(fonts: EmbeddedFonts): string {
+  const parts: string[] = []
+  if (fonts.displayB64) {
+    parts.push(`@font-face { font-family: 'BrewDisplay'; src: url('data:font/ttf;base64,${fonts.displayB64}') format('truetype'); font-weight: 100 900; }`)
+  }
+  if (fonts.bodyB64) {
+    parts.push(`@font-face { font-family: 'BrewBody'; src: url('data:font/ttf;base64,${fonts.bodyB64}') format('truetype'); font-weight: 100 900; }`)
+  }
+  return parts.join('\n        ')
+}
 
 // Server-side image designer. Takes a raw brewery photo and bakes a
 // designed layer on top: gradient for legibility, AI-written headline,
@@ -242,15 +289,21 @@ export async function composeDesignedImage(input: DesignInput): Promise<Buffer> 
   }
 
   // Headline + subhead style.
-  // Using web-safe fallback chain — Impact / Helvetica Neue Condensed Black /
-  // sans-serif. Custom font (Anton) can be embedded later via base64 @font-face.
-  const headlineFont = `'Impact', 'Helvetica Neue', 'Arial Black', sans-serif`
-  const bodyFont = `'Helvetica Neue', Arial, sans-serif`
+  // Fonts are bundled at public/brand/fonts/ and embedded base64 into the SVG
+  // so they render reliably on Vercel's fontless serverless runtime.
+  const fonts = loadEmbeddedFonts()
+  const headlineFont = fonts.displayB64
+    ? `'BrewDisplay', 'Impact', 'Arial Black', sans-serif`
+    : `'Impact', 'Helvetica Neue', 'Arial Black', sans-serif`
+  const bodyFont = fonts.bodyB64
+    ? `'BrewBody', 'Helvetica Neue', Arial, sans-serif`
+    : `'Helvetica Neue', Arial, sans-serif`
 
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">
     <defs>
       ${gradientDef}
       <style>
+        ${fontFaceCss(fonts)}
         .headline { font-family: ${headlineFont}; font-weight: ${preset.headlineWeight};
                     font-size: ${headlinePx}px; fill: ${colors.cream}; letter-spacing: -1.5px; }
         .subhead  { font-family: ${bodyFont}; font-weight: 500;
