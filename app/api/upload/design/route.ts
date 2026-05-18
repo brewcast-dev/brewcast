@@ -9,6 +9,7 @@ import { analyzePhoto } from '@/lib/ai/photo-analysis'
 import { generateImageHeadline, type HeadlineResult } from '@/lib/ai/headline'
 import { DEFAULT_BRAND_CONTEXT } from '@/lib/ai/captions'
 import { composeDesignedImage, type DesignIntensity } from '@/lib/image-design'
+import { prepareImageForDesign } from '@/lib/creative-director'
 import fs from 'fs'
 import path from 'path'
 
@@ -20,6 +21,8 @@ interface RequestBody {
   headline?: string
   subhead?: string
   badge?: string
+  // Set to false to skip the Nano Banana grading pass (default: true)
+  grading?: boolean
 }
 
 // Read optional brewery logo. Returns null if not present.
@@ -71,6 +74,15 @@ export async function POST(req: Request) {
     )
   }
 
+  // Per-user AI providers (used by both headline-gen and the creative director)
+  const config = resolveConfig(await getUserConfig(user.id))
+  const providers = {
+    google: createGoogleGenerativeAI({ apiKey: config.googleApiKey }),
+    groq: createGroq({ apiKey: config.groqApiKey }),
+    mistral: createMistral({ apiKey: config.mistralApiKey }),
+  }
+  const brandContext = config.brandContext ?? DEFAULT_BRAND_CONTEXT
+
   // 2. Resolve headline. If the caller passed one, use it as-is. Otherwise
   // look up the photo's stored analysis (or run vision inline) and ask the
   // AI for a punchy phrase.
@@ -83,14 +95,6 @@ export async function POST(req: Request) {
       intensity,
     }
   } else {
-    const config = resolveConfig(await getUserConfig(user.id))
-    const providers = {
-      google: createGoogleGenerativeAI({ apiKey: config.googleApiKey }),
-      groq: createGroq({ apiKey: config.groqApiKey }),
-      mistral: createMistral({ apiKey: config.mistralApiKey }),
-    }
-    const brandContext = config.brandContext ?? DEFAULT_BRAND_CONTEXT
-
     // Try the registry first; vision-analyze inline only if nothing stored.
     const { data: stored } = await supabase
       .from('brewery_photos')
@@ -140,18 +144,46 @@ export async function POST(req: Request) {
     if (body.intensity) headline.intensity = body.intensity
   }
 
-  // 3. Composite
+  // 3. Creative director: trim borders, smart 1:1 crop, vision-driven design
+  // decisions, optional Nano Banana grading. Output is a clean 1080×1080
+  // buffer ready for the compositor + a `decisions` object the compositor
+  // uses for decorative choices.
+  let preparedBuffer: Buffer
+  let designDecisions = null as Awaited<ReturnType<typeof prepareImageForDesign>>['decisions'] | null
+  try {
+    const prepared = await prepareImageForDesign({
+      imageBuffer,
+      imageUrl: body.imageUrl,
+      providers,
+      brandContext,
+      enableGrading: body.grading !== false,
+    })
+    preparedBuffer = prepared.buffer
+    designDecisions = prepared.decisions
+    // If the creative director suggested an intensity and the caller didn't
+    // force one, honor it.
+    if (!body.intensity && prepared.decisions.suggested_intensity) {
+      headline.intensity = prepared.decisions.suggested_intensity
+    }
+  } catch (err) {
+    console.warn('[design] creative director failed, using raw buffer:', (err as Error).message)
+    preparedBuffer = imageBuffer
+  }
+
+  // 4. Composite
   const logoBuffer = readLogoFromDisk()
   let designedBuffer: Buffer
   try {
     designedBuffer = await composeDesignedImage({
-      imageBuffer,
+      imageBuffer: preparedBuffer,
       headline: headline.headline,
       subhead: headline.subhead,
       handle: body.handle,
       badge: headline.badge,
       intensity: headline.intensity,
       logoBuffer: logoBuffer ?? undefined,
+      decorative: designDecisions?.suggested_decorative,
+      headlineColor: designDecisions?.headline_color ?? null,
     })
   } catch (err) {
     return NextResponse.json(

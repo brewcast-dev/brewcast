@@ -1,6 +1,7 @@
 import sharp from 'sharp'
 import fs from 'fs'
 import path from 'path'
+import { buildDecorativeSvg, type DecorativeKind } from './design-decoratives'
 
 // ─── Font embedding ─────────────────────────────────────────────────────────
 // Vercel's serverless runtime has no display fonts installed, so we MUST
@@ -67,6 +68,11 @@ export interface DesignInput {
   intensity: DesignIntensity
   logoBuffer?: Buffer      // Optional PNG/SVG; placed in a corner
   colors?: Partial<BrandColors>
+  // From the creative director — which decorative element to draw
+  decorative?: DecorativeKind
+  // Optional headline color override (creative director may pick one that
+  // contrasts better against the photo's dominant palette).
+  headlineColor?: string | null
 }
 
 export interface BrandColors {
@@ -299,13 +305,29 @@ export async function composeDesignedImage(input: DesignInput): Promise<Buffer> 
     ? `'BrewBody', 'Helvetica Neue', Arial, sans-serif`
     : `'Helvetica Neue', Arial, sans-serif`
 
+  // Decorative element from the creative director (optional)
+  const decorativeSvg = input.decorative && input.decorative !== 'none'
+    ? buildDecorativeSvg(input.decorative, {
+        W, H,
+        cream: colors.cream,
+        amber: colors.amber,
+        headlineY,
+        headlineX: margin,
+        gradientPos: preset.gradientPos,
+      })
+    : ''
+
+  // Headline color: creative director may have suggested one based on the
+  // photo's palette. Defaults to brand cream.
+  const headlineFill = input.headlineColor || colors.cream
+
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">
     <defs>
       ${gradientDef}
       <style>
         ${fontFaceCss(fonts)}
         .headline { font-family: ${headlineFont}; font-weight: ${preset.headlineWeight};
-                    font-size: ${headlinePx}px; fill: ${colors.cream}; letter-spacing: -1.5px; }
+                    font-size: ${headlinePx}px; fill: ${headlineFill}; letter-spacing: -1.5px; }
         .subhead  { font-family: ${bodyFont}; font-weight: 500;
                     font-size: ${subheadPx}px; fill: ${colors.cream}; opacity: 0.85; }
         .handle   { font-family: ${bodyFont}; font-weight: 600;
@@ -315,6 +337,7 @@ export async function composeDesignedImage(input: DesignInput): Promise<Buffer> 
       </style>
     </defs>
     ${gradientRect}
+    ${decorativeSvg}
     ${badgeSvg}
     ${headlineSvg}
     ${subheadSvg}
