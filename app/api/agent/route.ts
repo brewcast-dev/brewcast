@@ -20,6 +20,7 @@ import type { Brewery } from '@/types/database'
 import { analyzePhoto, analyzePhotos, type PhotoAnalysis } from '@/lib/ai/photo-analysis'
 import { generatePhotoCaption, generateCarouselCaption, DEFAULT_BRAND_CONTEXT } from '@/lib/ai/captions'
 import { publishPost as publishPostToMeta } from '@/lib/publish'
+import { refreshMetaAnalytics, getAnalyticsSummary } from '@/lib/analytics'
 import ffmpegPath from 'ffmpeg-static'
 import ffmpeg from 'fluent-ffmpeg'
 import fs from 'fs'
@@ -1089,85 +1090,16 @@ function buildTools(ctx: {
         const accessToken = config.metaAccessToken
         if (!igUserId || !accessToken) return { error: 'Meta credentials not configured for this account' }
 
-        const GRAPH_BASE = 'https://graph.facebook.com/v19.0'
-        const since = Math.floor(Date.now() / 1000) - days * 86400
-
         try {
-          const mediaRes = await fetch(
-            `${GRAPH_BASE}/${igUserId}/media?fields=id,timestamp,media_type&limit=50&since=${since}&access_token=${accessToken}`,
-          )
-          if (!mediaRes.ok) throw new Error(`Media list error ${mediaRes.status}`)
-
-          const mediaData = (await mediaRes.json()) as {
-            data: Array<{ id: string; timestamp: string; media_type: string }>
-          }
-          const mediaItems = mediaData.data ?? []
-
-          let totalReach = 0
-          let totalEngagements = 0
-          let topPost: { id: string; reach: number } | null = null
-
-          for (const media of mediaItems) {
-            const insightsRes = await fetch(
-              `${GRAPH_BASE}/${media.id}/insights?metric=reach,impressions,like_count,comments_count,shares,saved,plays&access_token=${accessToken}`,
-            )
-            if (!insightsRes.ok) continue
-
-            const insightsData = (await insightsRes.json()) as {
-              data: Array<{ name: string; values: Array<{ value: number }> }>
-            }
-            const m: Record<string, number> = {}
-            for (const metric of insightsData.data ?? []) {
-              m[metric.name] = metric.values?.[0]?.value ?? 0
-            }
-
-            const reach = m.reach ?? 0
-            const likes = m.like_count ?? 0
-            const comments = m.comments_count ?? 0
-            const shares = m.shares ?? 0
-            const saves = m.saved ?? 0
-            const plays = m.plays ?? 0
-            const impressions = m.impressions ?? 0
-
-            totalReach += reach
-            totalEngagements += likes + comments + shares + saves
-
-            const { data: dbPost } = await supabase
-              .from('posts')
-              .select('id')
-              .eq('meta_post_id', media.id)
-              .maybeSingle()
-
-            if (dbPost) {
-              await supabase.from('analytics').insert({
-                post_id: (dbPost as { id: string }).id,
-                captured_at: new Date().toISOString(),
-                reach,
-                impressions,
-                likes,
-                comments,
-                shares,
-                saves,
-                plays,
-              })
-
-              if (!topPost || reach > topPost.reach) {
-                topPost = { id: (dbPost as { id: string }).id, reach }
-              }
-            }
-          }
-
-          const avgEngagementRate =
-            totalReach > 0
-              ? Math.round((totalEngagements / totalReach) * 1000) / 10
-              : 0
-
+          const refresh = await refreshMetaAnalytics(supabase, { igUserId, accessToken }, days)
+          const summary = await getAnalyticsSummary(supabase, days)
           return {
             days_fetched: days,
-            posts_analyzed: mediaItems.length,
-            total_reach: totalReach,
-            avg_engagement_rate: avgEngagementRate,
-            top_post_id: topPost?.id ?? null,
+            posts_analyzed: refresh.posts_captured,
+            insights_failed: refresh.failed,
+            total_reach: summary.total_reach,
+            avg_engagement_rate: summary.avg_engagement_rate,
+            top_post_id: summary.top_post_id,
           }
         } catch (err) {
           return { error: (err as Error).message }
