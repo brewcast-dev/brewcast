@@ -2,7 +2,11 @@ import { createAdminClient } from './supabase'
 
 type SupabaseClient = ReturnType<typeof createAdminClient>
 
-const GRAPH_BASE = 'https://graph.facebook.com/v19.0'
+// Match lib/publish.ts — Instagram Graph endpoint, not Facebook Graph.
+// graph.facebook.com expects the Facebook Page ID and a different scope set;
+// graph.instagram.com works directly with the IG Business account ID + the
+// token your /settings already stores for publishing.
+const GRAPH_BASE = 'https://graph.instagram.com/v21.0'
 const REFRESH_COOLDOWN_HOURS = 6
 
 export interface MetaCredentials {
@@ -76,7 +80,15 @@ export async function refreshMetaAnalytics(
   const mediaRes = await fetch(
     `${GRAPH_BASE}/${igUserId}/media?fields=id,timestamp,media_type&limit=50&since=${since}&access_token=${accessToken}`,
   )
-  if (!mediaRes.ok) throw new Error(`Meta media list error ${mediaRes.status}`)
+  if (!mediaRes.ok) {
+    const body = await mediaRes.text()
+    let metaMsg = body.slice(0, 400)
+    try {
+      const parsed = JSON.parse(body) as { error?: { message?: string; code?: number; error_subcode?: number; type?: string } }
+      if (parsed.error?.message) metaMsg = parsed.error.message
+    } catch { /* keep raw text */ }
+    throw new Error(`Meta media list ${mediaRes.status}: ${metaMsg}`)
+  }
   const mediaData = (await mediaRes.json()) as { data?: MetaMediaItem[] }
   const items = mediaData.data ?? []
 
@@ -86,18 +98,28 @@ export async function refreshMetaAnalytics(
 
   for (const media of items) {
     try {
-      const insightsRes = await fetch(
-        `${GRAPH_BASE}/${media.id}/insights?metric=reach,impressions,like_count,comments_count,shares,saved,plays&access_token=${accessToken}`,
-      )
-      if (!insightsRes.ok) {
+      // Two requests per media:
+      //   1. /{id}?fields=...  — top-level media fields including like_count + comments_count
+      //   2. /{id}/insights?metric=...  — reach, shares, saved (these aren't on the media object)
+      // The insight metrics that work universally across IMAGE/VIDEO/CAROUSEL on
+      // Instagram Graph API v21 are reach, shares, saved. impressions/views was
+      // renamed and is inconsistent across post types — skip for now.
+      const [fieldsRes, insightsRes] = await Promise.all([
+        fetch(`${GRAPH_BASE}/${media.id}?fields=like_count,comments_count&access_token=${accessToken}`),
+        fetch(`${GRAPH_BASE}/${media.id}/insights?metric=reach,shares,saved&access_token=${accessToken}`),
+      ])
+      if (!fieldsRes.ok || !insightsRes.ok) {
         failed++
         continue
       }
+      const fields = (await fieldsRes.json()) as { like_count?: number; comments_count?: number }
       const insightsData = (await insightsRes.json()) as MetaInsightsResponse
       const m: Record<string, number> = {}
       for (const metric of insightsData.data ?? []) {
         m[metric.name] = metric.values?.[0]?.value ?? 0
       }
+      m.like_count = fields.like_count ?? 0
+      m.comments_count = fields.comments_count ?? 0
 
       const { data: dbPost } = await supabase
         .from('posts')
