@@ -132,11 +132,14 @@ export default function InputBar({
             <span className="text-lg leading-none">+</span>
           </button>
           {menuOpen && (
-            <div className="absolute bottom-full mb-2 left-0 z-10 w-56 rounded-xl border border-white/[0.10] bg-obsidian shadow-xl overflow-hidden">
+            <div
+              className="absolute z-50 w-60 rounded-xl border border-white/[0.10] bg-obsidian shadow-xl overflow-hidden"
+              style={{ bottom: 'calc(100% + 8px)', left: 0 }}
+            >
               <button
                 type="button"
                 onClick={() => { setMenuOpen(false); onOpenLibrary() }}
-                className="w-full px-4 py-2.5 text-left text-sm text-cream hover:bg-onyx transition-colors flex items-center gap-2"
+                className="w-full px-4 py-2.5 text-left text-sm text-cream hover:bg-onyx transition-colors flex items-center gap-2 whitespace-nowrap"
               >
                 <span>🖼️</span>
                 <span>From BrewCast library</span>
@@ -144,7 +147,7 @@ export default function InputBar({
               <button
                 type="button"
                 onClick={() => { setMenuOpen(false); fileInputRef.current?.click() }}
-                className="w-full px-4 py-2.5 text-left text-sm text-cream hover:bg-onyx transition-colors border-t border-white/[0.06] flex items-center gap-2"
+                className="w-full px-4 py-2.5 text-left text-sm text-cream hover:bg-onyx transition-colors border-t border-white/[0.06] flex items-center gap-2 whitespace-nowrap"
               >
                 <span>📤</span>
                 <span>Upload from device</span>
