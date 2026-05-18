@@ -118,7 +118,7 @@ export default function InputBar({
         </div>
       )}
 
-      <div className="flex items-end gap-2 rounded-2xl border border-white/[0.08] bg-obsidian px-3 py-3 focus-within:border-cream/30/50 transition-colors">
+      <div className="flex items-center gap-2 rounded-2xl border border-white/[0.08] bg-obsidian px-3 py-3 focus-within:border-cream/30/50 transition-colors">
         {/* + button + menu */}
         <div className="relative flex-shrink-0" ref={menuRef}>
           <button
