@@ -34,6 +34,68 @@ const DEFAULT_COLORS: BrandColors = {
   ink: '#0f172a',
 }
 
+// ─── Logo auto-processing ──────────────────────────────────────────────────
+// Many brand logos ship as black-on-white PNG/JPG. For watermarking on photos
+// we want white-on-transparent. This transforms ANY input into a white-ink
+// silhouette by treating brightness as inverse alpha — bright pixels become
+// transparent, dark pixels become opaque white.
+
+// Cache processed logos in-process: re-processing on every composite would
+// be slow + wasteful. Keyed by buffer reference.
+const processedLogoCache = new WeakMap<Buffer, Buffer>()
+
+async function processLogoForWatermark(rawLogo: Buffer): Promise<Buffer> {
+  const cached = processedLogoCache.get(rawLogo)
+  if (cached) return cached
+
+  // First check: if the input already has alpha channel with meaningful
+  // transparency, assume it's already a clean transparent PNG and use as-is.
+  const meta = await sharp(rawLogo).metadata()
+  if (meta.hasAlpha) {
+    // Sample a few pixels to detect if alpha is actually used (a PNG can have
+    // an alpha channel that's 100% opaque everywhere).
+    const { data } = await sharp(rawLogo).raw().toBuffer({ resolveWithObject: true })
+    const alphaIdx = 3
+    const channels = meta.channels ?? 4
+    let hasTransparency = false
+    for (let i = alphaIdx; i < data.length; i += channels) {
+      if (data[i] < 250) { hasTransparency = true; break }
+    }
+    if (hasTransparency) {
+      processedLogoCache.set(rawLogo, rawLogo)
+      return rawLogo
+    }
+  }
+
+  // Black-on-white (or grayscale-on-white) → white-on-transparent.
+  // 1. Convert to grayscale to get per-pixel brightness
+  // 2. Build an RGBA buffer: rgb=white, a=255-brightness
+  const { data: gray, info } = await sharp(rawLogo)
+    .removeAlpha()
+    .toColorspace('b-w')
+    .raw()
+    .toBuffer({ resolveWithObject: true })
+
+  const rgba = Buffer.alloc(info.width * info.height * 4)
+  for (let i = 0; i < gray.length; i++) {
+    const brightness = gray[i]
+    // Slight contrast curve — a faint pixel (180/255) should still be mostly
+    // transparent so light grays in the source don't muddy the watermark.
+    const alpha = Math.max(0, 255 - Math.round(brightness * 1.1))
+    rgba[i * 4]     = 255
+    rgba[i * 4 + 1] = 255
+    rgba[i * 4 + 2] = 255
+    rgba[i * 4 + 3] = alpha
+  }
+
+  const processed = await sharp(rgba, {
+    raw: { width: info.width, height: info.height, channels: 4 },
+  }).png().toBuffer()
+
+  processedLogoCache.set(rawLogo, processed)
+  return processed
+}
+
 // XML-escape strings injected into the SVG (headlines from AI can contain
 // arbitrary characters including & < > " — these would break SVG parse).
 function xmlEscape(s: string): string {
@@ -211,22 +273,23 @@ export async function composeDesignedImage(input: DesignInput): Promise<Buffer> 
   const composites: sharp.OverlayOptions[] = [{ input: Buffer.from(svg), top: 0, left: 0 }]
 
   if (input.logoBuffer) {
-    // Resize the logo to ~12% of the image width and place top-right.
-    const logoTargetW = Math.round(W * 0.12)
-    const logoResized = await sharp(input.logoBuffer)
+    // Auto-process: if the input is a flat black-on-white logo (no alpha),
+    // we strip white → transparent and invert ink to white so it watermarks
+    // cleanly on any photo. If it's already a clean transparent PNG, used as-is.
+    const watermarkSource = await processLogoForWatermark(input.logoBuffer)
+
+    // Resize to ~14% of image width and place top-right.
+    const logoTargetW = Math.round(W * 0.14)
+    const logoResized = await sharp(watermarkSource)
       .resize({ width: logoTargetW })
       .png()
       .toBuffer()
-    const logoMeta = await sharp(logoResized).metadata()
-    const logoH = logoMeta.height ?? logoTargetW
     composites.push({
       input: logoResized,
       top: margin,
       left: W - margin - logoTargetW,
       blend: 'over',
     })
-    // If a badge would collide with the logo (both top), nudge the logo down.
-    void logoH
   }
 
   return baseImg.composite(composites).jpeg({ quality: 88 }).toBuffer()
