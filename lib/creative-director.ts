@@ -23,7 +23,8 @@ export interface CreativeDirectorOptions {
   providers: { google: any; groq: any; mistral: any }
   brandContext?: string
   enableGrading?: boolean          // Defaults true if Google API key is set
-  targetSize?: number              // Output edge in px (default 1080)
+  targetWidth?: number             // Output width (default 1080)
+  targetHeight?: number            // Output height (default 1350 for 4:5)
 }
 
 export interface CreativeDirectorResult {
@@ -72,15 +73,29 @@ async function trimBorders(buffer: Buffer): Promise<{ buffer: Buffer; trimmed: b
  */
 async function smartCrop(
   buffer: Buffer,
-  size: number,
+  targetW: number,
+  targetH: number,
   subjectBbox: [number, number, number, number] | null,
 ): Promise<{ buffer: Buffer; from: [number, number]; to: [number, number] }> {
   const meta = await sharp(buffer).metadata()
-  const W = meta.width ?? size
-  const H = meta.height ?? size
+  const W = meta.width ?? targetW
+  const H = meta.height ?? targetH
 
-  // Compute the target crop region (square, fitting fully inside the image)
-  const cropEdge = Math.min(W, H)
+  // Compute the largest target-aspect rectangle that fits inside the source.
+  const targetAspect = targetW / targetH
+  const srcAspect = W / H
+  let cropW: number, cropH: number
+  if (srcAspect > targetAspect) {
+    // Source wider than target — crop horizontally
+    cropH = H
+    cropW = Math.round(H * targetAspect)
+  } else {
+    // Source taller than target — crop vertically
+    cropW = W
+    cropH = Math.round(W / targetAspect)
+  }
+
+  // Center the crop rect on the detected subject (or image center)
   let cx: number, cy: number
   if (subjectBbox) {
     const [bx, by, bw, bh] = subjectBbox
@@ -90,18 +105,17 @@ async function smartCrop(
     cx = Math.round(W / 2)
     cy = Math.round(H / 2)
   }
-  // Clamp so the square stays inside the image
-  let left = Math.max(0, Math.min(W - cropEdge, cx - Math.round(cropEdge / 2)))
-  let top = Math.max(0, Math.min(H - cropEdge, cy - Math.round(cropEdge / 2)))
+  let left = Math.max(0, Math.min(W - cropW, cx - Math.round(cropW / 2)))
+  let top = Math.max(0, Math.min(H - cropH, cy - Math.round(cropH / 2)))
   left = Math.round(left)
   top = Math.round(top)
 
   const cropped = await sharp(buffer)
-    .extract({ left, top, width: cropEdge, height: cropEdge })
-    .resize(size, size, { fit: 'cover' })
+    .extract({ left, top, width: cropW, height: cropH })
+    .resize(targetW, targetH, { fit: 'cover' })
     .toBuffer()
 
-  return { buffer: cropped, from: [W, H], to: [size, size] }
+  return { buffer: cropped, from: [W, H], to: [targetW, targetH] }
 }
 
 // ─── 3. Orchestration ───────────────────────────────────────────────────────
@@ -109,7 +123,8 @@ async function smartCrop(
 export async function prepareImageForDesign(
   opts: CreativeDirectorOptions,
 ): Promise<CreativeDirectorResult> {
-  const targetSize = opts.targetSize ?? 1080
+  const targetW = opts.targetWidth ?? 1080
+  const targetH = opts.targetHeight ?? 1350   // 4:5 default
   const diagnostics: CreativeDirectorResult['diagnostics'] = {
     trimmed: false,
     cropped: null,
@@ -136,13 +151,15 @@ export async function prepareImageForDesign(
       safe_text_zones: ['bottom'],
       decorative_vibe: 'minimal',
       suggested_intensity: 'bold',
+      suggested_template: 'bold-top',
+      kicker: null,
       suggested_decorative: 'none',
       headline_color: null,
     }
   }
 
-  // Step 3: smart square crop, focused on the detected subject
-  const c = await smartCrop(workingBuffer, targetSize, decisions.subject_bbox)
+  // Step 3: smart crop to the target aspect, focused on the detected subject
+  const c = await smartCrop(workingBuffer, targetW, targetH, decisions.subject_bbox)
   workingBuffer = c.buffer
   diagnostics.cropped = { from: c.from, to: c.to }
 

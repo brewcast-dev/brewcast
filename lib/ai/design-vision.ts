@@ -33,10 +33,24 @@ const DesignAnalysisSchema = z.object({
   decorative_vibe: z.enum(['minimal', 'vintage', 'playful', 'industrial', 'organic']),
   // How much the design should dominate the photo.
   suggested_intensity: z.enum(['subtle', 'bold', 'heavy']),
+  // Which layout template fits the photo. Mirrors the brand's reference posts.
+  //  - bold-top: bold sans headline at the top (loud, declarative — events,
+  //    promos, "what's new"). Default for most photos.
+  //  - serif-center: italic editorial serif centered (premium feel — menus,
+  //    seasonal features, story-style content).
+  //  - caps-bottom-arrow: all-caps headline at the bottom + arrow icon
+  //    (call-to-action, "swipe to see more", "scroll for the menu").
+  suggested_template: z
+    .enum(['bold-top', 'serif-center', 'caps-bottom-arrow'])
+    .describe('Which layout template to use. Defaults to bold-top for general content.'),
+  // Optional amber kicker label above the headline. Short, 2–4 words, all-caps
+  // friendly. Use sparingly — only when it adds real context (e.g. "TAP TAKEOVER",
+  // "NEW BREW", "WEEKEND SPECIAL"). Null = no kicker.
+  kicker: z.string().nullable().describe('Optional amber pill kicker above the headline (2-4 words). Null if not needed.'),
   // Which decoration would suit. The compositor maps these names to SVG.
   suggested_decorative: z
     .enum(['none', 'hops_corner', 'foam_burst', 'dotted_underline', 'vintage_frame', 'ribbon_banner', 'dashed_border', 'corner_arrow', 'starburst'])
-    .describe('A single decorative element from the library, or "none".'),
+    .describe('A single decorative element from the library, or "none". Prefer "none" for clean look.'),
   // If the photo has a strong cast (e.g. amber beer), suggest a headline
   // color that complements it. Null = use brand default cream.
   headline_color: z.string().nullable().describe('Hex color for headline text, or null to use brand default.'),
@@ -44,18 +58,28 @@ const DesignAnalysisSchema = z.object({
 
 export type DesignAnalysis = z.infer<typeof DesignAnalysisSchema>
 
-const SYSTEM_PROMPT = `You are an art director for a craft brewery's Instagram account. You analyse a raw photo and decide how a graphic designer would lay out a 1080×1080 social post on top of it.
+const SYSTEM_PROMPT = `You are an art director for a craft brewery's Instagram account. You analyse a raw photo and decide how a graphic designer would lay out a 1080×1350 social post (4:5 portrait) on top of it.
 
-Be decisive. Pick the ONE best subject, the ONE best decorative flourish (or "none"), and rank the safe zones honestly. If the photo is empty/abstract (e.g. a wall of taps with no people), the safe zones can be wide; if it's a tight portrait, only one zone may be truly safe.
+Be decisive. Pick the ONE best subject, the ONE best template, the ONE best decorative flourish (most of the time: "none"), and rank the safe zones honestly.
 
-For decorative_vibe + suggested_decorative:
-- "minimal" / "none" — clean, type-only. Use this if the photo is already busy or premium-looking.
-- "vintage" / "vintage_frame" or "ribbon_banner" — taproom interiors, brewing equipment, historical references.
-- "playful" / "foam_burst" or "starburst" — events, group shots, lively scenes.
-- "industrial" / "dashed_border" or "corner_arrow" — brewery floor, kegs, machinery.
-- "organic" / "hops_corner" or "dotted_underline" — outdoor, ingredients, food shots.
+TEMPLATE — pick based on the photo's content and tone:
+- "bold-top" — bold condensed sans headline at the TOP. Use for: events, promos, what's new, brewing process shots, big group shots. The DEFAULT choice for most posts. Loud and declarative.
+- "serif-center" — italic editorial serif headline centered vertically. Use for: seasonal features, menus, premium/editorial content, food close-ups, story moments. Feels refined and curated.
+- "caps-bottom-arrow" — ALL-CAPS bold headline at the bottom + arrow icon. Use for: calls-to-action ("scroll for the menu", "swipe to see more"), tap/pour/serve moments. Action-oriented.
 
-Subject bbox: tight box around the focal point. For people, frame the face/torso. For beer pours, frame the glass. Don't include too much padding.`
+KICKER — optional amber pill above the headline:
+- Use sparingly. Only when a 2–4 word label adds real context: "TAP TAKEOVER", "NEW BREW", "WEEKEND SPECIAL", "MANGO MENU".
+- Most photos: kicker = null.
+
+DECORATIVE — almost always "none":
+- The new templates already pull their weight visually. Only add a decorative if the photo really calls for one extra flourish.
+- "vintage_frame" or "ribbon_banner" for historical/heritage shots.
+- "foam_burst" for celebratory/event shots.
+- Most photos: suggested_decorative = "none".
+
+Subject bbox: tight box around the focal point. For people, frame the face/torso. For beer pours, frame the glass. Don't include too much padding.
+
+Headline color: stick to null (brand cream) unless the photo has an overwhelming color cast where white/cream would disappear.`
 
 export interface DesignVisionProviders {
   google: ReturnType<typeof createGoogleGenerativeAI>
@@ -121,6 +145,8 @@ export async function analyzeForDesign(
     safe_text_zones: ['bottom'],
     decorative_vibe: 'minimal',
     suggested_intensity: 'bold',
+    suggested_template: 'bold-top',
+    kicker: null,
     suggested_decorative: 'none',
     headline_color: null,
   }

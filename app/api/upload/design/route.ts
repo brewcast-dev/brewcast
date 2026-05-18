@@ -8,19 +8,23 @@ import { createMistral } from '@ai-sdk/mistral'
 import { analyzePhoto } from '@/lib/ai/photo-analysis'
 import { generateImageHeadline, type HeadlineResult } from '@/lib/ai/headline'
 import { DEFAULT_BRAND_CONTEXT } from '@/lib/ai/captions'
-import { composeDesignedImage, type DesignIntensity } from '@/lib/image-design'
+import { composeDesignedImage, type DesignIntensity, type DesignTemplate, type ComparisonRow } from '@/lib/image-design'
 import { prepareImageForDesign } from '@/lib/creative-director'
 import fs from 'fs'
 import path from 'path'
 
 interface RequestBody {
   imageUrl: string
-  intensity?: DesignIntensity
+  intensity?: DesignIntensity     // Legacy. Mapped to template if template not given.
+  template?: DesignTemplate       // Override the creative director's pick
+  aspect?: '4:5' | '1:1'          // Default 4:5
   handle?: string
   // Manual overrides — when present, skip AI headline generation.
   headline?: string
   subhead?: string
-  badge?: string
+  kicker?: string                 // Amber pill above headline (e.g. "TAP TAKEOVER")
+  badge?: string                  // Legacy alias for kicker
+  comparisons?: ComparisonRow[]   // Used when template === 'comparison'
   // Set to false to skip the Nano Banana grading pass (default: true)
   grading?: boolean
 }
@@ -172,6 +176,11 @@ export async function POST(req: Request) {
 
   // 4. Composite
   const logoBuffer = readLogoFromDisk()
+  // Template: caller override > creative director > intensity fallback
+  const template: DesignTemplate | undefined =
+    body.template ?? designDecisions?.suggested_template ?? undefined
+  // Kicker: caller override > vision suggestion > legacy badge field
+  const kicker = body.kicker ?? designDecisions?.kicker ?? body.badge ?? headline.badge
   let designedBuffer: Buffer
   try {
     designedBuffer = await composeDesignedImage({
@@ -179,8 +188,11 @@ export async function POST(req: Request) {
       headline: headline.headline,
       subhead: headline.subhead,
       handle: body.handle,
-      badge: headline.badge,
+      kicker: kicker ?? undefined,
+      template,
       intensity: headline.intensity,
+      aspect: body.aspect ?? '4:5',
+      comparisons: body.comparisons,
       logoBuffer: logoBuffer ?? undefined,
       decorative: designDecisions?.suggested_decorative,
       headlineColor: designDecisions?.headline_color ?? null,

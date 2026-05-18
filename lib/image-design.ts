@@ -1,117 +1,94 @@
 import sharp from 'sharp'
-import fs from 'fs'
-import path from 'path'
 import { buildDecorativeSvg, type DecorativeKind } from './design-decoratives'
+import { loadAllFonts, renderText, wrapTextToWidth, measureText } from './text-to-path'
 
-// ─── Font embedding ─────────────────────────────────────────────────────────
-// Vercel's serverless runtime has no display fonts installed, so we MUST
-// bundle our own and inline them base64 in the SVG's @font-face. Without
-// this, every <text> element falls back to tofu (▢▢▢) on production.
-//
-// Fonts loaded once at module init and reused across composites.
+// Server-side image designer. Takes a prepared photo (cropped + graded by
+// the creative director) and bakes a designed layer on top using one of
+// several "templates" — each a distinct layout pattern modeled after the
+// brand's reference posts (District 6's IG grid).
 
-interface EmbeddedFonts {
-  displayB64: string | null
-  bodyB64: string | null
-}
+// ─── Output config ──────────────────────────────────────────────────────────
 
-let _fontsCache: EmbeddedFonts | null = null
+export const OUTPUT_W = 1080
+export const OUTPUT_H = 1350         // 4:5 portrait by default
+export const OUTPUT_SQUARE = 1080    // when caller wants 1:1
 
-function loadEmbeddedFonts(): EmbeddedFonts {
-  if (_fontsCache) return _fontsCache
-  const fontsDir = path.join(process.cwd(), 'public', 'brand', 'fonts')
-  const tryRead = (file: string): string | null => {
-    try {
-      return fs.readFileSync(path.join(fontsDir, file)).toString('base64')
-    } catch {
-      return null
-    }
-  }
-  _fontsCache = {
-    displayB64: tryRead('Anton-Regular.ttf'),
-    bodyB64: tryRead('Inter-Variable.ttf'),
-  }
-  if (!_fontsCache.displayB64 || !_fontsCache.bodyB64) {
-    console.warn('[image-design] Bundled fonts missing — text will tofu on Vercel. Expected public/brand/fonts/{Anton-Regular,Inter-Variable}.ttf')
-  }
-  return _fontsCache
-}
+// ─── Template system ────────────────────────────────────────────────────────
 
-function fontFaceCss(fonts: EmbeddedFonts): string {
-  const parts: string[] = []
-  if (fonts.displayB64) {
-    parts.push(`@font-face { font-family: 'BrewDisplay'; src: url('data:font/ttf;base64,${fonts.displayB64}') format('truetype'); font-weight: 100 900; }`)
-  }
-  if (fonts.bodyB64) {
-    parts.push(`@font-face { font-family: 'BrewBody'; src: url('data:font/ttf;base64,${fonts.bodyB64}') format('truetype'); font-weight: 100 900; }`)
-  }
-  return parts.join('\n        ')
-}
+/**
+ * Template names. The creative director picks one based on the photo's
+ * vibe; the upload UI can also force a specific template.
+ *
+ *  - bold-top        : Anton condensed headline at the top, drop-shadowed
+ *  - serif-center    : Editorial italic serif centered (image 4 style)
+ *  - caps-bottom-arrow : All-caps headline at the bottom + drawn arrow below
+ *  - comparison      : Anton headline at top + 2-row CRAFT BEER / COMMERCIAL
+ *                      BEER comparison block at the bottom
+ */
+export type DesignTemplate =
+  | 'bold-top'
+  | 'serif-center'
+  | 'caps-bottom-arrow'
+  | 'comparison'
 
-// Server-side image designer. Takes a raw brewery photo and bakes a
-// designed layer on top: gradient for legibility, AI-written headline,
-// brewery handle watermark, optional logo, optional badge.
-//
-// Three intensity presets control how much the design dominates the photo:
-//   subtle:  small bottom strip, ~1 line of headline, 22% of image height
-//   bold:    large top + bottom strips with bigger type, ~35% of image
-//   heavy:   marquee-style headline overlaid on darkened photo, ~50%
-
+// Legacy alias kept for callers — maps to the new template names.
 export type DesignIntensity = 'subtle' | 'bold' | 'heavy'
+
+function intensityToTemplate(i: DesignIntensity): DesignTemplate {
+  if (i === 'subtle') return 'serif-center'
+  if (i === 'heavy') return 'caps-bottom-arrow'
+  return 'bold-top'
+}
+
+export interface ComparisonRow {
+  kicker: string                // amber-colored label like "CRAFT BEER"
+  body: string                  // descriptive text
+}
 
 export interface DesignInput {
   imageBuffer: Buffer
-  headline: string         // 1–6 words. The big bold phrase.
-  subhead?: string         // Optional 3–10 word follow-up.
-  handle?: string          // e.g. "@district6bangalore"
-  badge?: string           // Short pill text (e.g. "Tap Takeover", "New Brew")
-  intensity: DesignIntensity
-  logoBuffer?: Buffer      // Optional PNG/SVG; placed in a corner
+  headline: string              // 1–6 words. The big bold phrase.
+  subhead?: string              // Optional supporting line. Not used by all templates.
+  handle?: string               // e.g. "@district6bangalore"
+  kicker?: string               // Amber pill above the headline (image 4 style)
+  badge?: string                // Legacy alias for kicker. Used if kicker is missing.
+  template?: DesignTemplate     // What layout to use. Defaults via intensity.
+  intensity?: DesignIntensity   // Back-compat — mapped to template if template missing.
+  comparisons?: ComparisonRow[] // Required when template === 'comparison'
+  logoBuffer?: Buffer           // Optional brewery logo (PNG/JPG, B/W or transparent)
   colors?: Partial<BrandColors>
-  // From the creative director — which decorative element to draw
-  decorative?: DecorativeKind
-  // Optional headline color override (creative director may pick one that
-  // contrasts better against the photo's dominant palette).
-  headlineColor?: string | null
+  decorative?: DecorativeKind   // Optional decorative SVG overlay
+  headlineColor?: string | null // Vision-suggested override; default brand cream
+  // Output dimensions — default 1080×1350 (4:5). Pass square to force 1:1.
+  aspect?: '4:5' | '1:1'
 }
 
 export interface BrandColors {
-  cream: string   // light text + bright accents
-  amber: string   // secondary accent
-  ink: string     // dark gradient bg
+  cream: string
+  amber: string
+  ink: string
 }
 
 const DEFAULT_COLORS: BrandColors = {
   cream: '#f5f0e1',
-  amber: '#f59e0b',
+  amber: '#f5b740',
   ink: '#0f172a',
 }
 
-// ─── Logo auto-processing ──────────────────────────────────────────────────
-// Many brand logos ship as black-on-white PNG/JPG. For watermarking on photos
-// we want white-on-transparent. This transforms ANY input into a white-ink
-// silhouette by treating brightness as inverse alpha — bright pixels become
-// transparent, dark pixels become opaque white.
+// ─── Logo auto-processing (unchanged — works well) ─────────────────────────
 
-// Cache processed logos in-process: re-processing on every composite would
-// be slow + wasteful. Keyed by buffer reference.
 const processedLogoCache = new WeakMap<Buffer, Buffer>()
 
 async function processLogoForWatermark(rawLogo: Buffer): Promise<Buffer> {
   const cached = processedLogoCache.get(rawLogo)
   if (cached) return cached
 
-  // First check: if the input already has alpha channel with meaningful
-  // transparency, assume it's already a clean transparent PNG and use as-is.
   const meta = await sharp(rawLogo).metadata()
   if (meta.hasAlpha) {
-    // Sample a few pixels to detect if alpha is actually used (a PNG can have
-    // an alpha channel that's 100% opaque everywhere).
     const { data } = await sharp(rawLogo).raw().toBuffer({ resolveWithObject: true })
-    const alphaIdx = 3
     const channels = meta.channels ?? 4
     let hasTransparency = false
-    for (let i = alphaIdx; i < data.length; i += channels) {
+    for (let i = 3; i < data.length; i += channels) {
       if (data[i] < 250) { hasTransparency = true; break }
     }
     if (hasTransparency) {
@@ -120,9 +97,6 @@ async function processLogoForWatermark(rawLogo: Buffer): Promise<Buffer> {
     }
   }
 
-  // Black-on-white (or grayscale-on-white) → white-on-transparent.
-  // 1. Convert to grayscale to get per-pixel brightness
-  // 2. Build an RGBA buffer: rgb=white, a=255-brightness
   const { data: gray, info } = await sharp(rawLogo)
     .removeAlpha()
     .toColorspace('b-w')
@@ -132,10 +106,8 @@ async function processLogoForWatermark(rawLogo: Buffer): Promise<Buffer> {
   const rgba = Buffer.alloc(info.width * info.height * 4)
   for (let i = 0; i < gray.length; i++) {
     const brightness = gray[i]
-    // Slight contrast curve — a faint pixel (180/255) should still be mostly
-    // transparent so light grays in the source don't muddy the watermark.
     const alpha = Math.max(0, 255 - Math.round(brightness * 1.1))
-    rgba[i * 4]     = 255
+    rgba[i * 4] = 255
     rgba[i * 4 + 1] = 255
     rgba[i * 4 + 2] = 255
     rgba[i * 4 + 3] = alpha
@@ -149,223 +121,420 @@ async function processLogoForWatermark(rawLogo: Buffer): Promise<Buffer> {
   return processed
 }
 
-// XML-escape strings injected into the SVG (headlines from AI can contain
-// arbitrary characters including & < > " — these would break SVG parse).
-function xmlEscape(s: string): string {
-  return s
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&apos;')
+// ─── Shadow preset (used by every template) ────────────────────────────────
+
+const HEADLINE_SHADOW = {
+  offsetX: 0,
+  offsetY: 4,
+  blur: 6,
+  color: '#000000',
+  opacity: 0.55,
 }
 
-// Wrap long headlines onto multiple lines so they don't overflow the canvas.
-// Used by the SVG renderer to position each line with its own <tspan>.
-function wrapWords(text: string, maxWordsPerLine: number): string[] {
-  const words = text.trim().split(/\s+/)
-  const lines: string[] = []
-  for (let i = 0; i < words.length; i += maxWordsPerLine) {
-    lines.push(words.slice(i, i + maxWordsPerLine).join(' '))
+// ─── Template renderers ─────────────────────────────────────────────────────
+// Each returns a complete <svg> document string (without the closing </svg>;
+// callers append their own decoratives + close).
+
+interface RenderCtx {
+  W: number
+  H: number
+  colors: BrandColors
+  headlineFill: string
+  margin: number
+}
+
+function renderBoldTop(input: DesignInput, ctx: RenderCtx): { svg: string; headlineY: number; headlineX: number } {
+  const { W, H, colors, headlineFill, margin } = ctx
+  const headlineSize = Math.round(H * 0.085)
+  const maxWidth = W - margin * 2
+  const lines = wrapTextToWidth(input.headline, 'display', headlineSize, maxWidth)
+
+  // Headline anchored top-left, just below logo zone
+  const headlineY = Math.round(H * 0.13) + headlineSize
+  const head = renderText({
+    text: input.headline,
+    lines,
+    font: 'display',
+    fontSize: headlineSize,
+    x: margin,
+    y: headlineY,
+    color: headlineFill,
+    anchor: 'start',
+    shadow: HEADLINE_SHADOW,
+    lineHeight: 1.0,
+  })
+
+  // Optional subhead under the headline
+  let subSvg = ''
+  if (input.subhead) {
+    const subSize = Math.round(H * 0.028)
+    const subY = headlineY + head.totalHeight + Math.round(subSize * 0.6)
+    const subLines = wrapTextToWidth(input.subhead, 'body', subSize, maxWidth)
+    subSvg = renderText({
+      text: input.subhead,
+      lines: subLines,
+      font: 'body',
+      fontSize: subSize,
+      x: margin,
+      y: subY,
+      color: colors.cream,
+      opacity: 0.9,
+      anchor: 'start',
+      lineHeight: 1.25,
+    }).svg
   }
-  return lines
+
+  return { svg: head.svg + subSvg, headlineY, headlineX: margin }
 }
 
-interface RenderConfig {
-  // SVG-relative font sizes (the SVG matches the photo's pixel dimensions)
-  headlineSize: number
-  subheadSize: number
-  handleSize: number
-  badgeSize: number
-  headlineWords: number  // wrap rule
-  // Gradient strip height as a fraction of image height (0–1)
-  gradientFrac: number
-  // Where the gradient sits: top, bottom, or full
-  gradientPos: 'top' | 'bottom' | 'full'
-  // Darken multiplier over the photo behind the gradient (0–1)
-  scrim: number
-  // Headline font weight
-  headlineWeight: number
-}
+function renderSerifCenter(input: DesignInput, ctx: RenderCtx): { svg: string; headlineY: number; headlineX: number } {
+  const { W, H, colors, headlineFill, margin } = ctx
+  const headlineSize = Math.round(H * 0.075)
+  const maxWidth = W - margin * 2
+  const lines = wrapTextToWidth(input.headline, 'serif', headlineSize, maxWidth)
 
-const PRESETS: Record<DesignIntensity, RenderConfig> = {
-  subtle: {
-    headlineSize: 0.055, subheadSize: 0.028, handleSize: 0.022, badgeSize: 0.022,
-    headlineWords: 5, gradientFrac: 0.32, gradientPos: 'bottom', scrim: 0.35, headlineWeight: 800,
-  },
-  bold: {
-    headlineSize: 0.09, subheadSize: 0.032, handleSize: 0.024, badgeSize: 0.025,
-    headlineWords: 3, gradientFrac: 0.45, gradientPos: 'bottom', scrim: 0.5, headlineWeight: 900,
-  },
-  heavy: {
-    headlineSize: 0.14, subheadSize: 0.035, handleSize: 0.026, badgeSize: 0.028,
-    headlineWords: 2, gradientFrac: 1.0, gradientPos: 'full', scrim: 0.55, headlineWeight: 900,
-  },
-}
+  // Stack: optional kicker pill, then headline. All centered horizontally.
+  let cursorY = Math.round(H * 0.38)
 
-/**
- * Composite the design layer over the photo and return a JPEG buffer.
- */
-export async function composeDesignedImage(input: DesignInput): Promise<Buffer> {
-  const colors = { ...DEFAULT_COLORS, ...input.colors }
-  const preset = PRESETS[input.intensity]
-
-  // Read the photo's dimensions so we can build a same-size SVG overlay.
-  const baseImg = sharp(input.imageBuffer)
-  const meta = await baseImg.metadata()
-  const W = meta.width ?? 1080
-  const H = meta.height ?? 1080
-
-  const headlineLines = wrapWords(input.headline, preset.headlineWords)
-  const headlinePx = Math.round(H * preset.headlineSize)
-  const subheadPx = Math.round(H * preset.subheadSize)
-  const handlePx = Math.round(H * preset.handleSize)
-  const badgePx = Math.round(H * preset.badgeSize)
-
-  const gradH = Math.round(H * preset.gradientFrac)
-  const gradY = preset.gradientPos === 'top' ? 0 : preset.gradientPos === 'full' ? 0 : H - gradH
-
-  // Text block sits near the bottom of the gradient strip with a margin
-  const margin = Math.round(W * 0.05)
-  const lineHeight = 1.05
-  const headlineY = preset.gradientPos === 'top'
-    ? Math.round(margin + headlinePx)
-    : Math.round(H - margin - (input.subhead ? subheadPx + margin * 0.4 : 0))
-
-  // Build SVG overlay
-  const headlineSvg = headlineLines
-    .map((line, i) => {
-      const yOffset = preset.gradientPos === 'top'
-        ? headlineY + i * headlinePx * lineHeight
-        : headlineY - (headlineLines.length - 1 - i) * headlinePx * lineHeight
-      return `<text x="${margin}" y="${yOffset}" class="headline">${xmlEscape(line)}</text>`
+  // Kicker pill (image 4 style)
+  let kickerSvg = ''
+  const kickerText = input.kicker ?? input.badge
+  if (kickerText) {
+    const kickSize = Math.round(H * 0.022)
+    const padX = kickSize * 0.85
+    const padY = kickSize * 0.45
+    const w = measureText(kickerText, 'body', kickSize) + padX * 2
+    const x = (W - w) / 2
+    const y = cursorY
+    const rendered = renderText({
+      text: kickerText,
+      font: 'body',
+      fontSize: kickSize,
+      x: W / 2,
+      y: y + kickSize + padY * 0.6,
+      color: colors.cream,
+      anchor: 'middle',
     })
-    .join('')
-
-  const subheadSvg = input.subhead
-    ? `<text x="${margin}" y="${headlineY + subheadPx * 1.4}" class="subhead">${xmlEscape(input.subhead)}</text>`
-    : ''
-
-  const handleSvg = input.handle
-    ? `<text x="${W - margin}" y="${H - margin}" text-anchor="end" class="handle">${xmlEscape(input.handle)}</text>`
-    : ''
-
-  // Pill-style badge in the top-left corner
-  const badgeSvg = input.badge
-    ? (() => {
-        const padX = badgePx * 0.55
-        const padY = badgePx * 0.32
-        const approxW = input.badge.length * badgePx * 0.55 + padX * 2
-        const x = margin
-        const y = margin
-        return `
-          <rect x="${x}" y="${y}" width="${approxW}" height="${badgePx + padY * 2}"
-                rx="${(badgePx + padY * 2) / 2}" fill="${colors.amber}" opacity="0.95" />
-          <text x="${x + padX}" y="${y + badgePx + padY * 0.85}" class="badge">${xmlEscape(input.badge)}</text>
-        `
-      })()
-    : ''
-
-  // Gradient strip — multistop for a smoother falloff
-  let gradientDef = ''
-  let gradientRect = ''
-  if (preset.gradientPos === 'bottom') {
-    gradientDef = `
-      <linearGradient id="scrim" x1="0" y1="0" x2="0" y2="1">
-        <stop offset="0%" stop-color="${colors.ink}" stop-opacity="0"/>
-        <stop offset="60%" stop-color="${colors.ink}" stop-opacity="${preset.scrim * 0.85}"/>
-        <stop offset="100%" stop-color="${colors.ink}" stop-opacity="${preset.scrim}"/>
-      </linearGradient>`
-    gradientRect = `<rect x="0" y="${gradY}" width="${W}" height="${gradH}" fill="url(#scrim)"/>`
-  } else if (preset.gradientPos === 'top') {
-    gradientDef = `
-      <linearGradient id="scrim" x1="0" y1="0" x2="0" y2="1">
-        <stop offset="0%" stop-color="${colors.ink}" stop-opacity="${preset.scrim}"/>
-        <stop offset="100%" stop-color="${colors.ink}" stop-opacity="0"/>
-      </linearGradient>`
-    gradientRect = `<rect x="0" y="${gradY}" width="${W}" height="${gradH}" fill="url(#scrim)"/>`
-  } else {
-    gradientDef = `
-      <linearGradient id="scrim" x1="0" y1="0" x2="0" y2="1">
-        <stop offset="0%" stop-color="${colors.ink}" stop-opacity="${preset.scrim * 0.7}"/>
-        <stop offset="50%" stop-color="${colors.ink}" stop-opacity="0"/>
-        <stop offset="100%" stop-color="${colors.ink}" stop-opacity="${preset.scrim}"/>
-      </linearGradient>`
-    gradientRect = `<rect x="0" y="0" width="${W}" height="${H}" fill="url(#scrim)"/>`
+    kickerSvg = `
+      <rect x="${x}" y="${y}" width="${w}" height="${kickSize + padY * 2}"
+            rx="${(kickSize + padY * 2) / 2}" fill="${colors.amber}" opacity="0.95"/>
+      ${rendered.svg}`
+    cursorY += kickSize + padY * 2 + Math.round(H * 0.025)
   }
 
-  // Headline + subhead style.
-  // Fonts are bundled at public/brand/fonts/ and embedded base64 into the SVG
-  // so they render reliably on Vercel's fontless serverless runtime.
-  const fonts = loadEmbeddedFonts()
-  const headlineFont = fonts.displayB64
-    ? `'BrewDisplay', 'Impact', 'Arial Black', sans-serif`
-    : `'Impact', 'Helvetica Neue', 'Arial Black', sans-serif`
-  const bodyFont = fonts.bodyB64
-    ? `'BrewBody', 'Helvetica Neue', Arial, sans-serif`
-    : `'Helvetica Neue', Arial, sans-serif`
+  // Headline
+  const headY = cursorY + headlineSize
+  const head = renderText({
+    text: input.headline,
+    lines,
+    font: 'serif',
+    fontSize: headlineSize,
+    x: W / 2,
+    y: headY,
+    color: headlineFill,
+    anchor: 'middle',
+    shadow: HEADLINE_SHADOW,
+    lineHeight: 1.1,
+  })
 
-  // Decorative element from the creative director (optional)
+  return { svg: kickerSvg + head.svg, headlineY: headY, headlineX: W / 2 }
+}
+
+function renderCapsBottomArrow(input: DesignInput, ctx: RenderCtx): { svg: string; headlineY: number; headlineX: number } {
+  const { W, H, colors, headlineFill, margin } = ctx
+  const headlineSize = Math.round(H * 0.055)
+  const maxWidth = W - margin * 2
+  const upper = input.headline.toUpperCase()
+  const lines = wrapTextToWidth(upper, 'display', headlineSize, maxWidth)
+
+  // Headline near bottom, centered
+  const arrowH = Math.round(H * 0.08)
+  const headY = H - Math.round(H * 0.08) - arrowH
+  const head = renderText({
+    text: upper,
+    lines,
+    font: 'display',
+    fontSize: headlineSize,
+    x: W / 2,
+    y: headY,
+    color: headlineFill,
+    anchor: 'middle',
+    shadow: HEADLINE_SHADOW,
+    letterSpacing: 1.5,
+    lineHeight: 1.05,
+  })
+
+  // Hand-drawn-ish double-down arrow under the headline
+  const arrowCx = W / 2
+  const arrowTop = headY + head.totalHeight * 0.2 + Math.round(H * 0.015)
+  const arrowSize = Math.round(H * 0.05)
+  const stroke = Math.max(2, Math.round(H * 0.0035))
+  const arrowSvg = `
+    <g stroke="${colors.cream}" stroke-width="${stroke}" stroke-linecap="round" stroke-linejoin="round" fill="none" opacity="0.92">
+      <!-- left arrow -->
+      <path d="M ${arrowCx - arrowSize * 0.6} ${arrowTop}
+               L ${arrowCx - arrowSize * 0.6} ${arrowTop + arrowSize * 0.9}"/>
+      <path d="M ${arrowCx - arrowSize * 0.9} ${arrowTop + arrowSize * 0.55}
+               L ${arrowCx - arrowSize * 0.6} ${arrowTop + arrowSize * 0.9}
+               L ${arrowCx - arrowSize * 0.3} ${arrowTop + arrowSize * 0.55}"/>
+      <!-- right arrow -->
+      <path d="M ${arrowCx + arrowSize * 0.6} ${arrowTop}
+               L ${arrowCx + arrowSize * 0.6} ${arrowTop + arrowSize * 0.9}"/>
+      <path d="M ${arrowCx + arrowSize * 0.9} ${arrowTop + arrowSize * 0.55}
+               L ${arrowCx + arrowSize * 0.6} ${arrowTop + arrowSize * 0.9}
+               L ${arrowCx + arrowSize * 0.3} ${arrowTop + arrowSize * 0.55}"/>
+    </g>`
+
+  return { svg: head.svg + arrowSvg, headlineY: headY, headlineX: W / 2 }
+}
+
+function renderComparison(input: DesignInput, ctx: RenderCtx): { svg: string; headlineY: number; headlineX: number } {
+  const { W, H, colors, headlineFill, margin } = ctx
+  // Headline at top
+  const headlineSize = Math.round(H * 0.075)
+  const maxWidth = W - margin * 2
+  const lines = wrapTextToWidth(input.headline, 'display', headlineSize, maxWidth)
+  const headY = Math.round(H * 0.13) + headlineSize
+  const head = renderText({
+    text: input.headline,
+    lines,
+    font: 'display',
+    fontSize: headlineSize,
+    x: margin,
+    y: headY,
+    color: headlineFill,
+    anchor: 'start',
+    shadow: HEADLINE_SHADOW,
+    lineHeight: 1.0,
+  })
+
+  // Comparison block at the bottom — 2 rows of {kicker, body} with a divider
+  let blockSvg = ''
+  const rows = (input.comparisons ?? []).slice(0, 2)
+  if (rows.length > 0) {
+    const kickerSize = Math.round(H * 0.026)
+    const bodySize = Math.round(H * 0.022)
+    const rowGap = Math.round(H * 0.012)
+    const dividerGap = Math.round(H * 0.018)
+    const blockBottom = H - Math.round(H * 0.065)
+    const dividerThickness = Math.max(1, Math.round(H * 0.0012))
+
+    // Build from bottom up so we can stack into the bottom margin reliably
+    let cursorY = blockBottom
+
+    if (rows[1]) {
+      const r = rows[1]
+      const body = renderText({
+        text: r.body,
+        font: 'body',
+        fontSize: bodySize,
+        x: margin,
+        y: cursorY,
+        color: colors.cream,
+        anchor: 'start',
+        opacity: 0.95,
+      })
+      cursorY -= bodySize + rowGap
+      const kicker = renderText({
+        text: r.kicker.toUpperCase(),
+        font: 'display',
+        fontSize: kickerSize,
+        x: margin,
+        y: cursorY,
+        color: colors.amber,
+        anchor: 'start',
+        letterSpacing: 1,
+      })
+      cursorY -= kickerSize + dividerGap
+      blockSvg = body.svg + kicker.svg + blockSvg
+    }
+
+    if (rows[1] && rows[0]) {
+      const dividerY = cursorY
+      blockSvg = `<line x1="${margin}" y1="${dividerY}" x2="${W - margin}" y2="${dividerY}"
+                        stroke="${colors.cream}" stroke-width="${dividerThickness}" opacity="0.55"/>` + blockSvg
+      cursorY -= dividerGap
+    }
+
+    if (rows[0]) {
+      const r = rows[0]
+      const body = renderText({
+        text: r.body,
+        font: 'body',
+        fontSize: bodySize,
+        x: margin,
+        y: cursorY,
+        color: colors.cream,
+        anchor: 'start',
+        opacity: 0.95,
+      })
+      cursorY -= bodySize + rowGap
+      const kicker = renderText({
+        text: r.kicker.toUpperCase(),
+        font: 'display',
+        fontSize: kickerSize,
+        x: margin,
+        y: cursorY,
+        color: colors.amber,
+        anchor: 'start',
+        letterSpacing: 1,
+      })
+      blockSvg = body.svg + kicker.svg + blockSvg
+    }
+  }
+
+  return { svg: head.svg + blockSvg, headlineY: headY, headlineX: margin }
+}
+
+// ─── Compositor ─────────────────────────────────────────────────────────────
+
+export async function composeDesignedImage(input: DesignInput): Promise<Buffer> {
+  // Pre-warm font cache (idempotent)
+  loadAllFonts()
+
+  const colors = { ...DEFAULT_COLORS, ...input.colors }
+  const headlineFill = input.headlineColor || colors.cream
+
+  // Pick template (back-compat: map intensity if explicit template missing)
+  const template: DesignTemplate =
+    input.template ??
+    (input.intensity ? intensityToTemplate(input.intensity) : 'bold-top')
+
+  // Output dimensions
+  const aspect = input.aspect ?? '4:5'
+  const W = aspect === '1:1' ? OUTPUT_SQUARE : OUTPUT_W
+  const H = aspect === '1:1' ? OUTPUT_SQUARE : OUTPUT_H
+
+  // Resize photo to fit the canvas via cover crop. Creative director already
+  // smart-cropped, so this is just the final fit.
+  const photoFit = await sharp(input.imageBuffer)
+    .resize(W, H, { fit: 'cover', position: 'attention' })
+    .toBuffer()
+
+  const margin = Math.round(W * 0.055)
+  const ctx: RenderCtx = { W, H, colors, headlineFill, margin }
+
+  // ── Gradient scrim (per template) ─────────────────────────────────────────
+  let gradientSvg = ''
+  switch (template) {
+    case 'bold-top':
+    case 'comparison':
+      // Both: dark gradient top + bottom for legibility
+      gradientSvg = `
+        <linearGradient id="topScrim" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="${colors.ink}" stop-opacity="0.65"/>
+          <stop offset="100%" stop-color="${colors.ink}" stop-opacity="0"/>
+        </linearGradient>
+        <linearGradient id="botScrim" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="${colors.ink}" stop-opacity="0"/>
+          <stop offset="100%" stop-color="${colors.ink}" stop-opacity="${template === 'comparison' ? 0.85 : 0.55}"/>
+        </linearGradient>
+      `
+      break
+    case 'serif-center':
+      gradientSvg = `
+        <linearGradient id="midScrim" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="${colors.ink}" stop-opacity="0.35"/>
+          <stop offset="50%" stop-color="${colors.ink}" stop-opacity="0.5"/>
+          <stop offset="100%" stop-color="${colors.ink}" stop-opacity="0.35"/>
+        </linearGradient>
+      `
+      break
+    case 'caps-bottom-arrow':
+      gradientSvg = `
+        <linearGradient id="botScrim" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="${colors.ink}" stop-opacity="0"/>
+          <stop offset="60%" stop-color="${colors.ink}" stop-opacity="0.45"/>
+          <stop offset="100%" stop-color="${colors.ink}" stop-opacity="0.8"/>
+        </linearGradient>
+      `
+      break
+  }
+
+  let gradientRects = ''
+  if (template === 'bold-top' || template === 'comparison') {
+    const topH = Math.round(H * 0.28)
+    const botH = template === 'comparison' ? Math.round(H * 0.42) : Math.round(H * 0.20)
+    gradientRects = `
+      <rect x="0" y="0" width="${W}" height="${topH}" fill="url(#topScrim)"/>
+      <rect x="0" y="${H - botH}" width="${W}" height="${botH}" fill="url(#botScrim)"/>
+    `
+  } else if (template === 'serif-center') {
+    gradientRects = `<rect x="0" y="0" width="${W}" height="${H}" fill="url(#midScrim)"/>`
+  } else {
+    const botH = Math.round(H * 0.45)
+    gradientRects = `<rect x="0" y="${H - botH}" width="${W}" height="${botH}" fill="url(#botScrim)"/>`
+  }
+
+  // ── Template-specific layout ──────────────────────────────────────────────
+  let layout: { svg: string; headlineY: number; headlineX: number }
+  switch (template) {
+    case 'bold-top':         layout = renderBoldTop(input, ctx);         break
+    case 'serif-center':     layout = renderSerifCenter(input, ctx);     break
+    case 'caps-bottom-arrow':layout = renderCapsBottomArrow(input, ctx); break
+    case 'comparison':       layout = renderComparison(input, ctx);      break
+  }
+
+  // ── Handle (bottom-right, always, unless caps-bottom-arrow which has the arrow there) ─
+  let handleSvg = ''
+  if (input.handle && template !== 'caps-bottom-arrow' && template !== 'comparison') {
+    const handleSize = Math.round(H * 0.018)
+    const rendered = renderText({
+      text: input.handle,
+      font: 'body',
+      fontSize: handleSize,
+      x: W - margin,
+      y: H - margin,
+      color: colors.cream,
+      anchor: 'end',
+      opacity: 0.85,
+      letterSpacing: 0.5,
+    })
+    handleSvg = rendered.svg
+  }
+
+  // ── Decorative SVG snippet (optional) ─────────────────────────────────────
   const decorativeSvg = input.decorative && input.decorative !== 'none'
     ? buildDecorativeSvg(input.decorative, {
         W, H,
         cream: colors.cream,
         amber: colors.amber,
-        headlineY,
-        headlineX: margin,
-        gradientPos: preset.gradientPos,
+        headlineY: layout.headlineY,
+        headlineX: layout.headlineX,
+        gradientPos: template === 'caps-bottom-arrow' ? 'bottom' : template === 'serif-center' ? 'full' : 'bottom',
       })
     : ''
 
-  // Headline color: creative director may have suggested one based on the
-  // photo's palette. Defaults to brand cream.
-  const headlineFill = input.headlineColor || colors.cream
-
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">
-    <defs>
-      ${gradientDef}
-      <style>
-        ${fontFaceCss(fonts)}
-        .headline { font-family: ${headlineFont}; font-weight: ${preset.headlineWeight};
-                    font-size: ${headlinePx}px; fill: ${headlineFill}; letter-spacing: -1.5px; }
-        .subhead  { font-family: ${bodyFont}; font-weight: 500;
-                    font-size: ${subheadPx}px; fill: ${colors.cream}; opacity: 0.85; }
-        .handle   { font-family: ${bodyFont}; font-weight: 600;
-                    font-size: ${handlePx}px; fill: ${colors.cream}; opacity: 0.9; letter-spacing: 0.5px; }
-        .badge    { font-family: ${bodyFont}; font-weight: 700;
-                    font-size: ${badgePx}px; fill: ${colors.ink}; letter-spacing: 0.5px; text-transform: uppercase; }
-      </style>
-    </defs>
-    ${gradientRect}
+  // ── Final SVG document ────────────────────────────────────────────────────
+  const overlaySvg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">
+    <defs>${gradientSvg}</defs>
+    ${gradientRects}
     ${decorativeSvg}
-    ${badgeSvg}
-    ${headlineSvg}
-    ${subheadSvg}
+    ${layout.svg}
     ${handleSvg}
   </svg>`
 
-  // Composite: photo → gradient/text SVG → optional logo PNG
-  const composites: sharp.OverlayOptions[] = [{ input: Buffer.from(svg), top: 0, left: 0 }]
+  // ── Composite ─────────────────────────────────────────────────────────────
+  const composites: sharp.OverlayOptions[] = [{ input: Buffer.from(overlaySvg), top: 0, left: 0 }]
 
   if (input.logoBuffer) {
-    // Auto-process: if the input is a flat black-on-white logo (no alpha),
-    // we strip white → transparent and invert ink to white so it watermarks
-    // cleanly on any photo. If it's already a clean transparent PNG, used as-is.
     const watermarkSource = await processLogoForWatermark(input.logoBuffer)
-
-    // Resize to ~14% of image width and place top-right.
-    const logoTargetW = Math.round(W * 0.14)
+    const logoTargetW = Math.round(W * 0.16)
     const logoResized = await sharp(watermarkSource)
       .resize({ width: logoTargetW })
       .png()
       .toBuffer()
+    const logoMeta = await sharp(logoResized).metadata()
+    const logoH = logoMeta.height ?? logoTargetW
+    // Logo top-center (matches reference posts)
     composites.push({
       input: logoResized,
       top: margin,
-      left: W - margin - logoTargetW,
+      left: Math.round((W - logoTargetW) / 2),
       blend: 'over',
     })
+    void logoH
   }
 
-  return baseImg.composite(composites).jpeg({ quality: 88 }).toBuffer()
+  return sharp(photoFit).composite(composites).jpeg({ quality: 90 }).toBuffer()
 }
