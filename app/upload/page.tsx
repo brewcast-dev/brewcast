@@ -94,6 +94,61 @@ function Toast({
   )
 }
 
+// Full-size photo preview. Click backdrop or X to dismiss; Esc also closes.
+function Lightbox({
+  photo,
+  onClose,
+}: {
+  photo: BreweryPhoto
+  onClose: () => void
+}) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose()
+    }
+    document.addEventListener('keydown', onKey)
+    // Lock body scroll while open
+    const prevOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    return () => {
+      document.removeEventListener('keydown', onKey)
+      document.body.style.overflow = prevOverflow
+    }
+  }, [onClose])
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-sm p-8 cursor-zoom-out"
+      onClick={onClose}
+      role="dialog"
+      aria-modal="true"
+      aria-label="Photo preview"
+    >
+      <button
+        type="button"
+        onClick={onClose}
+        className="absolute top-5 right-5 w-10 h-10 rounded-full bg-black/60 hover:bg-black/80 text-cream flex items-center justify-center transition-colors"
+        aria-label="Close preview"
+      >
+        ✕
+      </button>
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        src={photo.url}
+        alt={photo.name}
+        className="max-w-full max-h-full object-contain rounded-lg shadow-2xl cursor-default"
+        onClick={(e) => e.stopPropagation()}
+      />
+      {(typeof photo.score === 'number' || photo.publishedAt) && (
+        <div className="absolute bottom-5 left-1/2 -translate-x-1/2 flex items-center gap-3 rounded-full bg-black/60 px-4 py-2 text-sm text-cream">
+          {typeof photo.score === 'number' && <span>Score: <span className="tabular-nums">{photo.score}</span></span>}
+          {photo.publishedAt && <span className="text-ash">Published {new Date(photo.publishedAt).toLocaleDateString()}</span>}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function PhotoCard({
   draft,
   onChange,
@@ -488,6 +543,7 @@ export default function UploadPage() {
   // Pre-generated during the AI pipeline so toggling Carousel is instant.
   const [carouselSuggestedCaption, setCarouselSuggestedCaption] = useState<string | null>(null)
   const [carouselSuggestedHashtags, setCarouselSuggestedHashtags] = useState<string[] | null>(null)
+  const [lightboxPhoto, setLightboxPhoto] = useState<BreweryPhoto | null>(null)
   const canvasWorkRef = useRef<HTMLCanvasElement | null>(null)
 
   const togglePhotoSelection = useCallback((name: string) => {
@@ -939,58 +995,69 @@ export default function UploadPage() {
                     const isSelected = selectedNames.has(photo.name)
                     const interactive = mode === 'manual' && libraryView === 'available'
                     return (
-                      <button
+                      <div
                         key={photo.name}
-                        type="button"
-                        onClick={() => {
-                          if (interactive) togglePhotoSelection(photo.name)
-                        }}
-                        disabled={!interactive && !isSelected}
-                        className={`group relative aspect-square w-full overflow-hidden rounded-lg border transition-all ${
+                        className={`group relative aspect-square w-full cursor-zoom-in rounded-lg border transition-all duration-200 hover:scale-110 hover:z-20 hover:shadow-2xl hover:shadow-black/60 ${
                           isSelected
                             ? 'border-cream/30 ring-2 ring-amber-500/40'
-                            : 'border-white/[0.06] hover:border-white/[0.10]'
-                        } ${interactive ? 'cursor-pointer' : 'cursor-default'} ${
-                          libraryView === 'archive' ? 'opacity-60' : ''
-                        }`}
-                        aria-pressed={interactive ? isSelected : undefined}
+                            : 'border-white/[0.06] hover:border-white/[0.20]'
+                        } ${libraryView === 'archive' ? 'opacity-60 hover:opacity-100' : ''}`}
+                        onClick={() => setLightboxPhoto(photo)}
+                        role="button"
+                        tabIndex={0}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' || e.key === ' ') {
+                            e.preventDefault()
+                            setLightboxPhoto(photo)
+                          }
+                        }}
+                        aria-label={`Preview ${photo.name}`}
                       >
-                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img
-                          src={photo.url}
-                          alt={photo.name}
-                          className={`w-full h-full object-cover transition-opacity ${
-                            interactive && !isSelected ? 'opacity-80 group-hover:opacity-100' : ''
-                          }`}
-                        />
+                        <div className="absolute inset-0 overflow-hidden rounded-lg">
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img
+                            src={photo.url}
+                            alt={photo.name}
+                            className={`w-full h-full object-cover transition-opacity ${
+                              interactive && !isSelected ? 'opacity-80 group-hover:opacity-100' : ''
+                            }`}
+                          />
+                        </div>
                         {/* Score badge for analyzed photos in the available view */}
                         {libraryView === 'available' && typeof photo.score === 'number' && (
-                          <div className="absolute top-1.5 left-1.5 z-10 rounded-full bg-black/70 text-cream text-[10px] font-semibold px-1.5 py-0.5 tabular-nums">
+                          <div className="absolute top-1.5 left-1.5 z-10 rounded-full bg-black/70 text-cream text-[10px] font-semibold px-1.5 py-0.5 tabular-nums pointer-events-none">
                             {photo.score}
                           </div>
                         )}
                         {libraryView === 'available' && photo.analyzed === false && (
-                          <div className="absolute top-1.5 left-1.5 z-10 rounded-full bg-black/70 text-amber-300 text-[10px] font-semibold px-1.5 py-0.5">
+                          <div className="absolute top-1.5 left-1.5 z-10 rounded-full bg-black/70 text-amber-300 text-[10px] font-semibold px-1.5 py-0.5 pointer-events-none">
                             …
                           </div>
                         )}
                         {libraryView === 'archive' && (
-                          <div className="absolute bottom-1.5 left-1.5 z-10 rounded-full bg-black/70 text-cream text-[10px] font-medium px-2 py-0.5">
+                          <div className="absolute bottom-1.5 left-1.5 z-10 rounded-full bg-black/70 text-cream text-[10px] font-medium px-2 py-0.5 pointer-events-none">
                             published
                           </div>
                         )}
                         {interactive && (
-                          <div
-                            className={`absolute top-1.5 right-1.5 w-5 h-5 rounded-full border-2 flex items-center justify-center text-xs font-bold transition-all ${
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              togglePhotoSelection(photo.name)
+                            }}
+                            className={`absolute top-1.5 right-1.5 z-10 w-5 h-5 rounded-full border-2 flex items-center justify-center text-xs font-bold transition-all hover:scale-125 ${
                               isSelected
                                 ? 'border-cream bg-cream text-ink'
-                                : 'border-white/60 bg-black/30 text-transparent group-hover:border-white'
+                                : 'border-white/60 bg-black/40 text-transparent group-hover:border-white group-hover:text-white/60'
                             }`}
+                            aria-pressed={isSelected}
+                            aria-label={isSelected ? 'Deselect photo' : 'Select photo'}
                           >
                             ✓
-                          </div>
+                          </button>
                         )}
-                      </button>
+                      </div>
                     )
                   })}
                 </div>
@@ -1182,6 +1249,11 @@ export default function UploadPage() {
           message={toast}
           onClose={() => setToast(null)}
         />
+      )}
+
+      {/* Full-size lightbox */}
+      {lightboxPhoto && (
+        <Lightbox photo={lightboxPhoto} onClose={() => setLightboxPhoto(null)} />
       )}
     </div>
   )
