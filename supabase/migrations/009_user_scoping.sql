@@ -1,15 +1,11 @@
--- Per-user data isolation, phase 2.
+-- Per-user data isolation, phase 2. Idempotent — safe to re-run.
 --
--- Migration 006 already added user_id (nullable) to posts + drafts and the
--- agent has been writing it on insert. This migration:
---   1. Adds user_id to brewery_photos + analytics (the two content tables
---      that were still single-tenant).
---   2. Backfills any NULL user_id rows in posts + drafts + the new ones to
---      brewcast.demo@gmail.com.
---   3. Promotes user_id to NOT NULL on all four so new rows can't slip
---      through without an owner.
---   4. Adds RLS policies as defense-in-depth — the app uses the service
---      role and bypasses RLS, so the *code* must still filter by user_id.
+-- Migration 006 already added user_id (nullable) to posts + drafts. This
+-- migration:
+--   1. Adds user_id to brewery_photos + analytics if not present
+--   2. Backfills any NULL user_id rows to brewcast.demo@gmail.com
+--   3. Promotes user_id to NOT NULL on all four
+--   4. Indexes + RLS read policies (defense-in-depth — app uses service role)
 
 -- ─── 1. Add user_id where missing ───────────────────────────────────────────
 alter table brewery_photos add column if not exists user_id uuid references auth.users(id) on delete cascade;
@@ -31,7 +27,7 @@ begin
   update drafts          set user_id = demo_uid where user_id is null;
 end $$;
 
--- ─── 3. NOT NULL ────────────────────────────────────────────────────────────
+-- ─── 3. NOT NULL (idempotent — alter is a no-op if already NOT NULL) ────────
 alter table brewery_photos alter column user_id set not null;
 alter table analytics      alter column user_id set not null;
 alter table posts          alter column user_id set not null;
@@ -41,22 +37,52 @@ alter table drafts         alter column user_id set not null;
 create index if not exists brewery_photos_user_id_idx on brewery_photos(user_id);
 create index if not exists analytics_user_id_idx       on analytics(user_id);
 
--- Hottest read path: best N photos for a user, only those not yet published
 drop index if exists brewery_photos_score_idx;
-create index brewery_photos_user_score_idx
+create index if not exists brewery_photos_user_score_idx
   on brewery_photos(user_id, score desc nulls last)
   where published_at is null;
 
--- ─── 5. RLS policies — defense in depth ─────────────────────────────────────
-drop policy if exists "service role full access" on brewery_photos;
-create policy "service role full access" on brewery_photos using (true) with check (true);
-create policy "users see own brewery_photos" on brewery_photos for select to authenticated using (user_id = auth.uid());
+-- ─── 5. RLS read policies — defense in depth ───────────────────────────────
+-- Service role policies created by earlier migrations are left alone.
+-- Only add the user-scoped read policies, idempotently.
+do $$ begin
+  if not exists (
+    select 1 from pg_policies
+    where schemaname = 'public' and tablename = 'brewery_photos'
+      and policyname = 'users see own brewery_photos'
+  ) then
+    create policy "users see own brewery_photos"
+      on brewery_photos for select to authenticated
+      using (user_id = auth.uid());
+  end if;
 
-drop policy if exists "service role full access" on analytics;
-create policy "service role full access" on analytics using (true) with check (true);
-create policy "users see own analytics" on analytics for select to authenticated using (user_id = auth.uid());
+  if not exists (
+    select 1 from pg_policies
+    where schemaname = 'public' and tablename = 'analytics'
+      and policyname = 'users see own analytics'
+  ) then
+    create policy "users see own analytics"
+      on analytics for select to authenticated
+      using (user_id = auth.uid());
+  end if;
 
--- posts + drafts already have RLS enabled from 001_init; add user-scoped read
--- policies. Service role policies already exist from earlier migrations.
-create policy "users see own posts"  on posts  for select to authenticated using (user_id = auth.uid());
-create policy "users see own drafts" on drafts for select to authenticated using (user_id = auth.uid());
+  if not exists (
+    select 1 from pg_policies
+    where schemaname = 'public' and tablename = 'posts'
+      and policyname = 'users see own posts'
+  ) then
+    create policy "users see own posts"
+      on posts for select to authenticated
+      using (user_id = auth.uid());
+  end if;
+
+  if not exists (
+    select 1 from pg_policies
+    where schemaname = 'public' and tablename = 'drafts'
+      and policyname = 'users see own drafts'
+  ) then
+    create policy "users see own drafts"
+      on drafts for select to authenticated
+      using (user_id = auth.uid());
+  end if;
+end $$;
