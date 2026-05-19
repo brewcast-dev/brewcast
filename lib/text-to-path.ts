@@ -1,6 +1,12 @@
 import fs from 'fs'
 import path from 'path'
-import opentype from 'opentype.js'
+import * as opentype from 'opentype.js'
+
+// opentype.js v2 ships dual CJS/ESM. Next.js/Vercel's bundler sometimes
+// resolves the default import to `undefined` in the lambda, which made
+// `opentype.parse(...)` throw "Cannot read properties of undefined". The
+// namespace import is reliable; if a `default` is present, prefer it.
+const otApi: typeof opentype = ((opentype as unknown as { default?: typeof opentype }).default) ?? opentype
 
 // Bulletproof text rendering for SVG composites. Instead of relying on
 // @font-face + system font discovery (which fails on Vercel/Lambda where
@@ -45,7 +51,7 @@ function loadFont(key: FontKey): opentype.Font | null {
   for (const candidate of fontCandidatePaths(file)) {
     try {
       const buf = fs.readFileSync(candidate)
-      const font = opentype.parse(buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength))
+      const font = otApi.parse(buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength))
       _fontCache.set(key, font)
       _fontStatus.set(key, { loaded: true, path: candidate })
       console.log(`[text-to-path] loaded ${file} from ${candidate}`)
