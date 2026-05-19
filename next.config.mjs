@@ -36,6 +36,9 @@ const nextConfig = {
       '/api/upload/design': [
         './public/brand/**/*',
       ],
+      '/api/debug/design': [
+        './public/brand/**/*',
+      ],
     },
   },
   // Silence the "Critical dependency" warning from pg-boss

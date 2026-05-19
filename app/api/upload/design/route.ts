@@ -10,7 +10,8 @@ import { generateImageHeadline, type HeadlineResult } from '@/lib/ai/headline'
 import { DEFAULT_BRAND_CONTEXT } from '@/lib/ai/captions'
 import { composeDesignedImage, type DesignIntensity, type DesignTemplate, type ComparisonRow } from '@/lib/image-design'
 import { prepareImageForDesign } from '@/lib/creative-director'
-import { aiDesignImage } from '@/lib/ai/nano-banana'
+import { editPhotoHeavily } from '@/lib/ai/nano-banana'
+import { getFontStatus } from '@/lib/text-to-path'
 import sharp from 'sharp'
 import fs from 'fs'
 import path from 'path'
@@ -185,80 +186,58 @@ export async function POST(req: Request) {
   // Kicker: caller override > vision suggestion > legacy badge field
   const kicker = body.kicker ?? designDecisions?.kicker ?? body.badge ?? headline.badge
 
-  // 4. Try the FULL AI design pass first — Nano Banana renders headline,
-  // kicker, graphics, and color grading directly into the photo. This is
-  // the path that actually produces designs matching the reference posts.
-  // Falls back to the templated compositor on failure.
-  let designedBuffer: Buffer | null = null
-  let designPath: 'ai' | 'template' = 'template'
+  // 4. Heavy photo edit via Nano Banana (color grade + contrast + vignette
+  // + sharpening). NO text rendering here — image-gen models are unreliable
+  // at legible text. Text + graphics get composited by code in step 5.
+  let editedPhoto = preparedBuffer
+  let aiEditApplied = false
+  let aiEditError: string | null = null
   if (aiDesignEnabled) {
     try {
-      const aiResult = await aiDesignImage({
+      const aiResult = await editPhotoHeavily({
         imageBuffer: preparedBuffer,
-        headline: headline.headline,
-        subhead: headline.subhead ?? null,
-        kicker: kicker ?? null,
-        handle: body.handle ?? null,
         mood: designDecisions?.mood ?? null,
         brandContext,
-        template: template === 'comparison' ? 'bold-top' : (template ?? 'bold-top'),
         providers,
       })
       if (aiResult) {
-        // Re-fit to the requested aspect (model can drift on dimensions),
-        // then overlay the real brewery logo on top for brand consistency.
+        // Re-fit to the requested aspect — the model can drift on dimensions
         const aspect = body.aspect ?? '4:5'
-        const W = aspect === '1:1' ? 1080 : 1080
+        const W = 1080
         const H = aspect === '1:1' ? 1080 : 1350
-        const fitted = await sharp(aiResult)
+        editedPhoto = await sharp(aiResult)
           .resize(W, H, { fit: 'cover', position: 'attention' })
           .toBuffer()
-        if (logoBuffer) {
-          // Use composeDesignedImage with empty text to get the consistent
-          // logo placement + processing (white-inversion of black-on-white).
-          designedBuffer = await composeDesignedImage({
-            imageBuffer: fitted,
-            headline: '',                 // headline already baked into the photo
-            subhead: undefined,
-            handle: undefined,            // handle also baked in by the model
-            template,
-            intensity: headline.intensity,
-            aspect,
-            logoBuffer,
-            // No decoratives or kicker — those are in the AI image now.
-            decorative: 'none',
-            headlineColor: null,
-          })
-        } else {
-          designedBuffer = fitted
-        }
-        designPath = 'ai'
+        aiEditApplied = true
       } else {
-        console.warn('[design] aiDesignImage returned null — falling back to templated compositor')
+        aiEditError = 'Nano Banana returned no image'
+        console.warn('[design] heavy edit returned null — using ungraded photo')
       }
     } catch (err) {
-      console.warn('[design] aiDesignImage failed, falling back to templated compositor:', (err as Error).message)
+      aiEditError = (err as Error).message
+      console.warn('[design] heavy edit failed:', aiEditError)
     }
   }
 
-  // 5. Fallback: templated compositor (gradient + text-to-path + logo)
+  // 5. Templated compositor — always runs. Overlays headline, kicker,
+  // decoratives, handle, and the brewery logo onto whatever photo the
+  // previous step produced (edited or original).
+  let designedBuffer: Buffer
   try {
-    if (!designedBuffer) {
-      designedBuffer = await composeDesignedImage({
-        imageBuffer: preparedBuffer,
-        headline: headline.headline,
-        subhead: headline.subhead,
-        handle: body.handle,
-        kicker: kicker ?? undefined,
-        template,
-        intensity: headline.intensity,
-        aspect: body.aspect ?? '4:5',
-        comparisons: body.comparisons,
-        logoBuffer: logoBuffer ?? undefined,
-        decorative: designDecisions?.suggested_decorative,
-        headlineColor: designDecisions?.headline_color ?? null,
-      })
-    }
+    designedBuffer = await composeDesignedImage({
+      imageBuffer: editedPhoto,
+      headline: headline.headline,
+      subhead: headline.subhead,
+      handle: body.handle,
+      kicker: kicker ?? undefined,
+      template,
+      intensity: headline.intensity,
+      aspect: body.aspect ?? '4:5',
+      comparisons: body.comparisons,
+      logoBuffer: logoBuffer ?? undefined,
+      decorative: designDecisions?.suggested_decorative,
+      headlineColor: designDecisions?.headline_color ?? null,
+    })
   } catch (err) {
     return NextResponse.json(
       { error: `Composite failed: ${(err as Error).message}` },
@@ -277,6 +256,11 @@ export async function POST(req: Request) {
   }
   const { data: urlData } = supabase.storage.from('edited-posts').getPublicUrl(storagePath)
 
+  // Diagnostic block — surfaces whether fonts loaded so we can see
+  // immediately why text might not be rendering.
+  const fontStatus = getFontStatus()
+  const fontsLoaded = fontStatus.display.loaded && fontStatus.serif.loaded && fontStatus.body.loaded
+
   return NextResponse.json({
     url: urlData.publicUrl,
     headline: headline.headline,
@@ -285,6 +269,9 @@ export async function POST(req: Request) {
     kicker: kicker ?? null,
     intensity: headline.intensity,
     template: template ?? null,
-    design_path: designPath,
+    ai_edit_applied: aiEditApplied,
+    ai_edit_error: aiEditError,
+    fonts_loaded: fontsLoaded,
+    fonts_detail: fontsLoaded ? undefined : fontStatus,
   })
 }

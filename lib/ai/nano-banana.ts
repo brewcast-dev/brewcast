@@ -140,91 +140,98 @@ export async function gradeImage(
   return callNanoBanana(GRADING_PROMPT(mood), imageBuffer, apiKey)
 }
 
-// ─── Full AI design: photo → finished social post ──────────────────────────
-// Hands the entire design problem to Gemini 2.5 Flash Image: color-grade
-// the photo, render headline + kicker text directly into the image, place
-// graphic flourishes. The result is a fully-designed post that just needs
-// our brand logo overlaid for consistency.
-//
-// This is the "creative director" approach the templated overlay was a
-// poor substitute for.
+// ─── Heavy photo edit (NO text rendering — that's done by code) ─────────────
+// Gemini 2.5 Flash Image is great at photo editing but unreliable at
+// rendering legible text. So we split the job: this function does AGGRESSIVE
+// photo editing (cinematic grade, contrast, vignette, sharpening); the
+// caller layers text + graphics on top via lib/image-design.ts.
 
-export interface AiDesignOptions {
+export interface AiEditOptions {
   imageBuffer: Buffer
-  headline: string
-  subhead?: string | null
-  kicker?: string | null              // e.g. "TAP TAKEOVER"
-  handle?: string | null              // e.g. "@district6bangalore"
   mood?: string | null                // from vision: "cozy" | "vibrant" | etc.
   brandContext?: string | null
-  template?: 'bold-top' | 'serif-center' | 'caps-bottom-arrow'
   providers: Providers
   explicitApiKey?: string
 }
 
-function aiDesignPrompt(opts: AiDesignOptions): string {
-  const mood = opts.mood ?? 'vibrant'
-  const layoutGuide = (() => {
-    switch (opts.template) {
-      case 'serif-center':
-        return `LAYOUT — editorial / centered:
-- The headline goes in the VERTICAL CENTER of the image, in BOLD ITALIC SERIF typeface (think DM Serif Display Italic or Playfair Display Italic), white with a soft dark drop shadow.
-- The headline reads across 2–3 lines, centered horizontally.
-${opts.kicker ? `- ABOVE the headline, add a small AMBER (#f5b740) rounded pill with the text "${opts.kicker}" in white uppercase sans-serif inside.` : ''}
-- Keep the brewery scene visible behind the headline. A subtle dark vignette across the middle band gives the text contrast.`
-      case 'caps-bottom-arrow':
-        return `LAYOUT — call-to-action / bottom:
-- The headline goes at the BOTTOM-CENTER of the image, in ALL CAPS BOLD CONDENSED SANS-SERIF (think Anton or Bebas Neue), white with a soft dark drop shadow.
-- The headline spans 1–2 lines, centered.
-- BELOW the headline, draw a small hand-drawn-style downward double-arrow in white (two simple parallel arrows pointing down).
-- A dark gradient at the bottom 35% of the image (transparent at top, dark at bottom) gives the text contrast.`
-      case 'bold-top':
-      default:
-        return `LAYOUT — bold / top:
-- The headline goes at the TOP-LEFT of the image, in BOLD CONDENSED SANS-SERIF (think Anton or Oswald Black), white with a soft dark drop shadow.
-- The headline reads across 1–3 lines, left-aligned, taking up roughly 60% of the width.
-${opts.kicker ? `- ABOVE the headline, add a small AMBER (#f5b740) rounded pill with the text "${opts.kicker}" in white uppercase sans-serif inside.` : ''}
-${opts.subhead ? `- BELOW the headline, in a thinner white sans-serif, add this supporting line: "${opts.subhead}"` : ''}
-- A soft dark gradient at the top 30% of the image (dark at top, transparent at bottom) gives the text contrast.`
+// Legacy alias — design route still calls aiDesignImage; keep the import
+// working by re-exporting under both names.
+export interface AiDesignOptions extends AiEditOptions {
+  headline?: string
+  subhead?: string | null
+  kicker?: string | null
+  handle?: string | null
+  template?: 'bold-top' | 'serif-center' | 'caps-bottom-arrow'
+}
+
+function editPhotoPrompt(mood: string, brandContext?: string | null): string {
+  // Pick a look based on the vision-detected mood. Each look pushes a
+  // distinct, recognisably "designed" feel — not subtle grading.
+  const look = (() => {
+    const m = mood.toLowerCase()
+    if (m.includes('cozy') || m.includes('warm') || m.includes('golden')) {
+      return `WARM EDITORIAL look — push the highlights toward warm amber/honey, deepen shadows to near-black, lift the midtones with a soft golden glow. Add a subtle vignette darkening the corners ~30%. Mood: dimly-lit pub at golden hour.`
     }
+    if (m.includes('moody') || m.includes('dark') || m.includes('noir') || m.includes('gritty')) {
+      return `MOODY CINEMATIC look — heavy contrast, crush the blacks, desaturate the midtones, leave only highlights popping. Strong vignette (~45%). Slight teal-and-orange split toning. Mood: late-night session, dramatic.`
+    }
+    if (m.includes('vibrant') || m.includes('festive') || m.includes('playful') || m.includes('lively')) {
+      return `VIBRANT EVENT look — push saturation hard, lift highlights, add a faint warm light leak from the upper-right corner. Sharpen the subject crisply. Mood: peak-hour celebration.`
+    }
+    if (m.includes('clean') || m.includes('minimal') || m.includes('premium')) {
+      return `CLEAN EDITORIAL look — balanced exposure, slightly desaturated, neutral highlights, gentle shadow lift. Very subtle vignette. Mood: high-end magazine feature.`
+    }
+    return `RICH EDITORIAL look — deepen shadows, push contrast, gently boost saturation, sharpen the focal point. Add a subtle vignette darkening the corners ~25%.`
   })()
 
-  return `You are a senior graphic designer creating a polished Instagram post for ${opts.brandContext ?? 'a craft brewery'}. Edit this RAW photo into a FINISHED social media graphic.
+  return `You are a master photo editor finishing a raw photograph for ${brandContext ?? 'a craft brewery'}'s premium Instagram feed. Apply DRAMATIC editorial color grading — not subtle correction. The output must look noticeably more polished than the input.
 
-ASPECT: keep the input's 4:5 portrait aspect (1080×1350). Do NOT re-frame or crop the subject.
+${look}
 
-PHOTO ENHANCEMENTS:
-- Professional color grading appropriate for a "${mood}" mood. Punch up the vibrancy in highlights, deepen shadows, balance any color cast, and gently sharpen the focal point.
-- The edit should look editorial — not over-processed. No surreal filters.
-- Keep ALL existing subjects, composition, and scene elements EXACTLY as they are. Do not add or remove people, food, drinks, furniture, or details.
+ALWAYS APPLY:
+- Deepen shadows (clip lightly into pure black at the deepest points)
+- Add a soft vignette darkening the corners
+- Sharpen the focal subject so it pops against the background
+- Balance any obvious color cast in the lighting
+- Light film grain / texture (very subtle — don't make it look noisy)
 
-${layoutGuide}
+ABSOLUTE RULES:
+- Same aspect ratio as input. Do NOT re-crop or re-frame.
+- Same subjects, same composition, same scene elements. Do NOT add or remove people, glasses, food, furniture, or background details.
+- Do NOT add text, logos, watermarks, captions, badges, frames, or any graphic overlays. These are composited afterwards by separate code.
+- Do NOT make it surreal or over-stylized. Editorial, not Instagram-filter.
 
-HEADLINE TEXT (must appear in the rendered image, spelled exactly as given):
-"${opts.headline}"
-
-GRAPHIC FLOURISHES:
-- One or two subtle decorative elements that fit the brewery theme: hop sprigs in a corner, foam bubbles near beer glasses, a fine dashed line under the headline, a thin vintage-style frame, or a small starburst. Keep them tasteful and minimal — the photo and the headline are the heroes.
-- Do NOT add a logo or watermark. We composite the real brewery logo afterward.
-
-${opts.handle ? `HANDLE: in the BOTTOM-RIGHT corner, in small white sans-serif, render "${opts.handle}" with 60% opacity.` : ''}
-
-OUTPUT a single finished image, ready to post.`
+Output a single edited image.`
 }
 
 /**
- * Generate a fully-designed social post using Nano Banana. The model
- * color-grades the photo, renders the headline+kicker+graphics inline,
- * and returns a finished image. Returns null if the model declines or
- * doesn't return image bytes (caller falls back to the templated
- * compositor).
+ * Heavily edit a photo: cinematic color grading, contrast, vignette,
+ * sharpening. NO text or graphic overlays — those are added by code
+ * afterwards. Returns null if the model declines / doesn't return image
+ * bytes (caller falls back to the original/ungraded buffer).
  *
  * Throws on transport errors (4xx/5xx).
  */
-export async function aiDesignImage(opts: AiDesignOptions): Promise<Buffer | null> {
+export async function editPhotoHeavily(opts: AiEditOptions): Promise<Buffer | null> {
   const apiKey = opts.explicitApiKey ?? getGoogleApiKey(opts.providers)
   if (!apiKey) {
-    throw new Error('No Google API key available for AI design')
+    throw new Error('No Google API key available for AI photo edit')
   }
-  return callNanoBanana(aiDesignPrompt(opts), opts.imageBuffer, apiKey)
+  const mood = opts.mood ?? 'vibrant'
+  return callNanoBanana(editPhotoPrompt(mood, opts.brandContext), opts.imageBuffer, apiKey)
+}
+
+/**
+ * Back-compat alias. Old callers that called aiDesignImage (which used to
+ * also render text+graphics) now just get the heavy photo edit. Text and
+ * graphics happen in lib/image-design.ts afterwards.
+ */
+export async function aiDesignImage(opts: AiDesignOptions): Promise<Buffer | null> {
+  return editPhotoHeavily({
+    imageBuffer: opts.imageBuffer,
+    mood: opts.mood,
+    brandContext: opts.brandContext,
+    providers: opts.providers,
+    explicitApiKey: opts.explicitApiKey,
+  })
 }

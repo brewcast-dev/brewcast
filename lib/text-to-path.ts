@@ -21,23 +21,43 @@ const FONT_FILES: Record<FontKey, string> = {
 }
 
 const _fontCache = new Map<FontKey, opentype.Font>()
+const _fontStatus = new Map<FontKey, { loaded: boolean; error?: string; path?: string }>()
 let _fontsTried = false
+
+// Probe paths in order. Vercel serverless runs from /var/task; public/ files
+// land there when outputFileTracingIncludes is set. Locally process.cwd() is
+// the project root. We try both so the same code works in dev and prod.
+function fontCandidatePaths(file: string): string[] {
+  return [
+    path.join(process.cwd(), 'public', 'brand', 'fonts', file),
+    path.join(process.cwd(), '.next', 'standalone', 'public', 'brand', 'fonts', file),
+    // Vercel-specific fallback — public files sometimes resolve relative
+    // to the lambda root, not cwd
+    path.join('/var/task', 'public', 'brand', 'fonts', file),
+  ]
+}
 
 function loadFont(key: FontKey): opentype.Font | null {
   const cached = _fontCache.get(key)
   if (cached) return cached
-  try {
-    const file = path.join(process.cwd(), 'public', 'brand', 'fonts', FONT_FILES[key])
-    const buf = fs.readFileSync(file)
-    const font = opentype.parse(buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength))
-    _fontCache.set(key, font)
-    return font
-  } catch (err) {
-    if (!_fontsTried) {
-      console.warn(`[text-to-path] Failed to load ${FONT_FILES[key]}:`, (err as Error).message)
+  const file = FONT_FILES[key]
+  const errors: string[] = []
+  for (const candidate of fontCandidatePaths(file)) {
+    try {
+      const buf = fs.readFileSync(candidate)
+      const font = opentype.parse(buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength))
+      _fontCache.set(key, font)
+      _fontStatus.set(key, { loaded: true, path: candidate })
+      console.log(`[text-to-path] loaded ${file} from ${candidate}`)
+      return font
+    } catch (err) {
+      errors.push(`${candidate}: ${(err as Error).message}`)
     }
-    return null
   }
+  const msg = errors.join(' | ')
+  _fontStatus.set(key, { loaded: false, error: msg })
+  console.error(`[text-to-path] FAILED to load ${file} — tried ${errors.length} paths: ${msg}`)
+  return null
 }
 
 // Pre-warm font cache once. Idempotent.
@@ -45,6 +65,16 @@ export function loadAllFonts(): void {
   if (_fontsTried) return
   _fontsTried = true
   for (const key of ['display', 'serif', 'body'] as const) loadFont(key)
+}
+
+// Diagnostic: what's the load status for each font?
+export function getFontStatus(): Record<FontKey, { loaded: boolean; error?: string; path?: string }> {
+  loadAllFonts()
+  return {
+    display: _fontStatus.get('display') ?? { loaded: false, error: 'never attempted' },
+    serif: _fontStatus.get('serif') ?? { loaded: false, error: 'never attempted' },
+    body: _fontStatus.get('body') ?? { loaded: false, error: 'never attempted' },
+  }
 }
 
 // ─── Measurement ────────────────────────────────────────────────────────────

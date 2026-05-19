@@ -671,7 +671,18 @@ export default function UploadPage() {
           setToast(`Design step failed: ${msg.slice(0, 120)}`)
           return null
         }
-        return await res.json()
+        const result = await res.json()
+        // Surface diagnostic flags as a one-time toast so we can SEE if the
+        // AI edit ran and whether fonts loaded for the text overlay.
+        const flags: string[] = []
+        if (result.ai_edit_applied === false) {
+          flags.push(`AI edit skipped: ${result.ai_edit_error ?? 'unknown'}`)
+        }
+        if (result.fonts_loaded === false) {
+          flags.push('fonts NOT loaded — text will be missing')
+        }
+        if (flags.length > 0) setToast(flags.join(' · '))
+        return result
       } catch (err) {
         const msg = (err as Error).message
         console.error('[design] FAILED:', msg)
