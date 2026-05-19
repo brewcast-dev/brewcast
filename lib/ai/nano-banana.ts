@@ -9,7 +9,9 @@ import type { createGoogleGenerativeAI } from '@ai-sdk/google'
 // for Gemini, so we call the REST endpoint directly with the API key we
 // already have on the google provider instance.
 
-const MODEL = 'gemini-2.5-flash-image-preview'
+// GA model ID. The previous '-preview' name was deprecated and now 404s
+// (see https://ai.google.dev/gemini-api/docs/models/gemini-2.5-flash-image).
+const MODEL = 'gemini-2.5-flash-image'
 const ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent`
 
 interface GeminiImagePart {
