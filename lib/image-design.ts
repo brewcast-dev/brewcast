@@ -427,8 +427,8 @@ export async function composeDesignedImage(input: DesignInput): Promise<Buffer> 
   // (after the SVG overlay) below.
   let logoResized: Buffer | null = null
   let logoLeft = 0
-  let logoTop = margin
   let logoBottom = 0
+  const logoTop = margin
   const logoTargetW = Math.round(W * 0.16)
   if (input.logoBuffer) {
     const watermarkSource = await processLogoForWatermark(input.logoBuffer)
