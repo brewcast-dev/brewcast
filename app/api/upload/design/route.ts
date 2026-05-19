@@ -35,6 +35,33 @@ interface RequestBody {
   aiDesign?: boolean
 }
 
+// Last-resort headline so the design pipeline never dies just because all
+// the AI providers refused. Picks a short phrase from the photo's mood and
+// dominant subjects. Generic but on-brand; better than a blank overlay.
+function heuristicHeadline(
+  analysis: { mood: string; subjects: string[]; description: string },
+  intensity: DesignIntensity,
+): HeadlineResult {
+  const mood = (analysis.mood ?? '').toLowerCase()
+  const subj = (analysis.subjects ?? []).join(' ').toLowerCase()
+
+  let headline = 'Crafted On Site'
+  if (mood.includes('cozy') || mood.includes('warm') || mood.includes('golden')) {
+    headline = 'Settle In Slow'
+  } else if (mood.includes('moody') || mood.includes('dark') || mood.includes('noir')) {
+    headline = 'Late Night Pour'
+  } else if (mood.includes('vibrant') || mood.includes('festive') || mood.includes('lively')) {
+    headline = 'Pour It Up'
+  } else if (subj.includes('beer') || subj.includes('glass') || subj.includes('pint') || subj.includes('tap')) {
+    headline = 'Fresh On Tap'
+  } else if (subj.includes('food') || subj.includes('plate') || subj.includes('burger')) {
+    headline = 'Pair It Up'
+  } else if (subj.includes('crowd') || subj.includes('people') || subj.includes('bar')) {
+    headline = 'Pull Up A Stool'
+  }
+  return { headline, intensity }
+}
+
 // Read optional brewery logo. Returns null if not present.
 function readLogoFromDisk(): Buffer | null {
   const candidates = [
@@ -97,6 +124,7 @@ export async function POST(req: Request) {
   // look up the photo's stored analysis (or run vision inline) and ask the
   // AI for a punchy phrase.
   let headline: HeadlineResult
+  let headlineFallback: string | null = null
   if (body.headline) {
     headline = {
       headline: body.headline,
@@ -145,10 +173,12 @@ export async function POST(req: Request) {
     try {
       headline = await generateImageHeadline(analysis, providers, brandContext)
     } catch (err) {
-      return NextResponse.json(
-        { error: `Headline generation failed: ${(err as Error).message}` },
-        { status: 500 },
-      )
+      // Never block the design on headline gen — providers throttle, schemas
+      // mis-validate. Derive a plausible phrase from the vision analysis so
+      // the design pipeline always produces something usable.
+      headlineFallback = (err as Error).message
+      console.warn('[design] headline gen failed, falling back to heuristic:', headlineFallback)
+      headline = heuristicHeadline(analysis, intensity)
     }
     // Caller-supplied intensity overrides the AI's recommendation.
     if (body.intensity) headline.intensity = body.intensity
@@ -273,5 +303,6 @@ export async function POST(req: Request) {
     ai_edit_error: aiEditError,
     fonts_loaded: fontsLoaded,
     fonts_detail: fontsLoaded ? undefined : fontStatus,
+    headline_fallback: headlineFallback,
   })
 }

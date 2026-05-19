@@ -681,6 +681,9 @@ export default function UploadPage() {
         if (result.fonts_loaded === false) {
           flags.push('fonts NOT loaded — text will be missing')
         }
+        if (result.headline_fallback) {
+          flags.push(`headline AI failed (${String(result.headline_fallback).slice(0, 60)}…) — using fallback`)
+        }
         if (flags.length > 0) setToast(flags.join(' · '))
         return result
       } catch (err) {
