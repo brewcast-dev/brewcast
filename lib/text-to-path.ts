@@ -85,6 +85,22 @@ export function getFontStatus(): Record<FontKey, { loaded: boolean; error?: stri
 
 // ─── Measurement ────────────────────────────────────────────────────────────
 
+// Walk the string glyph-by-glyph via charToGlyph + advanceWidth. This
+// deliberately bypasses font.getAdvanceWidth / font.stringToGlyphs because
+// those paths apply GSUB features and opentype.js v2 throws on unsupported
+// substitution formats — Inter-Variable in particular triggers
+// "substitutionType : 62 lookupType: 6 - substFormat: 2 is not yet supported".
+// We lose ligatures and contextual swashes, which is fine for short headlines.
+function measureLine(font: opentype.Font, text: string, fontSize: number): number {
+  const scale = fontSize / font.unitsPerEm
+  let w = 0
+  for (const ch of text) {
+    const g = font.charToGlyph(ch)
+    w += (g.advanceWidth ?? 0) * scale
+  }
+  return w
+}
+
 /**
  * Measure the width in pixels of `text` rendered in `font` at `fontSize`.
  * Used by the wrap function below.
@@ -92,7 +108,7 @@ export function getFontStatus(): Record<FontKey, { loaded: boolean; error?: stri
 export function measureText(text: string, font: FontKey, fontSize: number): number {
   const f = loadFont(font)
   if (!f) return text.length * fontSize * 0.55  // rough fallback
-  return f.getAdvanceWidth(text, fontSize)
+  return measureLine(f, text, fontSize)
 }
 
 /**
@@ -195,7 +211,12 @@ export function renderText(opts: RenderTextOptions): RenderedText {
     filterAttr = ` filter="url(#${id})"`
   }
 
-  // Build a path per line, anchored as requested
+  // Build a path per line, anchored as requested. We always go glyph-by-glyph
+  // (rather than font.getPath(line, ...)) because font.getPath runs the text
+  // through stringToGlyphs which applies GSUB features — and opentype.js
+  // throws on unsupported GSUB substitution formats present in Inter / DM
+  // Serif. charToGlyph + glyph.getPath skips that pipeline entirely.
+  const scale = opts.fontSize / f.unitsPerEm
   const paths: string[] = []
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i]
@@ -205,18 +226,17 @@ export function renderText(opts: RenderTextOptions): RenderedText {
     else if (opts.anchor === 'end') x0 = opts.x - w
     const y0 = opts.y + i * opts.fontSize * lineHeight
 
-    if (ls === 0) {
-      // Fast path: render whole line as one path
-      const pathObj = f.getPath(line, x0, y0, opts.fontSize)
-      paths.push(`<path d="${pathObj.toPathData(2)}" fill="${color}" opacity="${opacity}"/>`)
-    } else {
-      // Letter-spaced: render glyph by glyph, advance manually
-      let cursor = x0
-      for (const ch of line) {
-        const pathObj = f.getPath(ch, cursor, y0, opts.fontSize)
-        paths.push(`<path d="${pathObj.toPathData(2)}" fill="${color}" opacity="${opacity}"/>`)
-        cursor += measureText(ch, opts.font, opts.fontSize) + ls
-      }
+    let cursor = x0
+    const subpaths: string[] = []
+    for (const ch of line) {
+      const g = f.charToGlyph(ch)
+      const pathObj = g.getPath(cursor, y0, opts.fontSize)
+      const d = pathObj.toPathData(2)
+      if (d) subpaths.push(d)
+      cursor += (g.advanceWidth ?? 0) * scale + ls
+    }
+    if (subpaths.length > 0) {
+      paths.push(`<path d="${subpaths.join(' ')}" fill="${color}" opacity="${opacity}"/>`)
     }
   }
 
