@@ -141,16 +141,23 @@ interface RenderCtx {
   colors: BrandColors
   headlineFill: string
   margin: number
+  // Y-coordinate (px) of the bottom edge of the logo zone, including
+  // margin. 0 if no logo. Templates that put text at the top use this
+  // to push the headline below the logo so the two don't collide.
+  logoBottom: number
 }
 
 function renderBoldTop(input: DesignInput, ctx: RenderCtx): { svg: string; headlineY: number; headlineX: number } {
-  const { W, H, colors, headlineFill, margin } = ctx
+  const { W, H, colors, headlineFill, margin, logoBottom } = ctx
   const headlineSize = Math.round(H * 0.085)
   const maxWidth = W - margin * 2
   const lines = wrapTextToWidth(input.headline, 'display', headlineSize, maxWidth)
 
-  // Headline anchored top-left, just below logo zone
-  const headlineY = Math.round(H * 0.13) + headlineSize
+  // Headline anchored top-left, just below logo zone. Pick the LATER of
+  // a fixed 13% top inset and (logo bottom + breathing room) so a tall
+  // logo never gets overlapped by the headline.
+  const headlineTop = Math.max(Math.round(H * 0.13), logoBottom + Math.round(H * 0.03))
+  const headlineY = headlineTop + headlineSize
   const head = renderText({
     text: input.headline,
     lines,
@@ -289,12 +296,13 @@ function renderCapsBottomArrow(input: DesignInput, ctx: RenderCtx): { svg: strin
 }
 
 function renderComparison(input: DesignInput, ctx: RenderCtx): { svg: string; headlineY: number; headlineX: number } {
-  const { W, H, colors, headlineFill, margin } = ctx
-  // Headline at top
+  const { W, H, colors, headlineFill, margin, logoBottom } = ctx
+  // Headline at top — pushed below the logo zone if a logo is present
   const headlineSize = Math.round(H * 0.075)
   const maxWidth = W - margin * 2
   const lines = wrapTextToWidth(input.headline, 'display', headlineSize, maxWidth)
-  const headY = Math.round(H * 0.13) + headlineSize
+  const headTop = Math.max(Math.round(H * 0.13), logoBottom + Math.round(H * 0.03))
+  const headY = headTop + headlineSize
   const head = renderText({
     text: input.headline,
     lines,
@@ -412,7 +420,26 @@ export async function composeDesignedImage(input: DesignInput): Promise<Buffer> 
     .toBuffer()
 
   const margin = Math.round(W * 0.055)
-  const ctx: RenderCtx = { W, H, colors, headlineFill, margin }
+
+  // ── Logo pre-processing ───────────────────────────────────────────────────
+  // Resize the logo up-front so we know its actual height and can position
+  // the headline below it (instead of overlapping). We composite it last
+  // (after the SVG overlay) below.
+  let logoResized: Buffer | null = null
+  let logoLeft = 0
+  let logoTop = margin
+  let logoBottom = 0
+  const logoTargetW = Math.round(W * 0.16)
+  if (input.logoBuffer) {
+    const watermarkSource = await processLogoForWatermark(input.logoBuffer)
+    logoResized = await sharp(watermarkSource).resize({ width: logoTargetW }).png().toBuffer()
+    const logoMeta = await sharp(logoResized).metadata()
+    const logoH = logoMeta.height ?? logoTargetW
+    logoLeft = Math.round((W - logoTargetW) / 2)
+    logoBottom = logoTop + logoH
+  }
+
+  const ctx: RenderCtx = { W, H, colors, headlineFill, margin, logoBottom }
 
   // ── Gradient scrim (per template) ─────────────────────────────────────────
   let gradientSvg = ''
@@ -515,25 +542,17 @@ export async function composeDesignedImage(input: DesignInput): Promise<Buffer> 
   </svg>`
 
   // ── Composite ─────────────────────────────────────────────────────────────
+  // Order: photo (base) → SVG overlay (text, gradient, decoratives) → logo.
+  // Logo on top so it never gets occluded by text or scrim.
   const composites: sharp.OverlayOptions[] = [{ input: Buffer.from(overlaySvg), top: 0, left: 0 }]
 
-  if (input.logoBuffer) {
-    const watermarkSource = await processLogoForWatermark(input.logoBuffer)
-    const logoTargetW = Math.round(W * 0.16)
-    const logoResized = await sharp(watermarkSource)
-      .resize({ width: logoTargetW })
-      .png()
-      .toBuffer()
-    const logoMeta = await sharp(logoResized).metadata()
-    const logoH = logoMeta.height ?? logoTargetW
-    // Logo top-center (matches reference posts)
+  if (logoResized) {
     composites.push({
       input: logoResized,
-      top: margin,
-      left: Math.round((W - logoTargetW) / 2),
+      top: logoTop,
+      left: logoLeft,
       blend: 'over',
     })
-    void logoH
   }
 
   return sharp(photoFit).composite(composites).jpeg({ quality: 90 }).toBuffer()
