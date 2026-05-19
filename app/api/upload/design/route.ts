@@ -11,6 +11,7 @@ import { DEFAULT_BRAND_CONTEXT } from '@/lib/ai/captions'
 import { composeDesignedImage, type DesignIntensity, type DesignTemplate, type ComparisonRow } from '@/lib/image-design'
 import { prepareImageForDesign } from '@/lib/creative-director'
 import { editPhotoHeavily } from '@/lib/ai/nano-banana'
+import { cloudflareImageEdit, moodToCloudflarePrompt } from '@/lib/ai/cloudflare-edit'
 import { getFontStatus } from '@/lib/text-to-path'
 import sharp from 'sharp'
 import fs from 'fs'
@@ -216,13 +217,23 @@ export async function POST(req: Request) {
   // Kicker: caller override > vision suggestion > legacy badge field
   const kicker = body.kicker ?? designDecisions?.kicker ?? body.badge ?? headline.badge
 
-  // 4. Heavy photo edit via Nano Banana (color grade + contrast + vignette
-  // + sharpening). NO text rendering here — image-gen models are unreliable
-  // at legible text. Text + graphics get composited by code in step 5.
+  // 4. Heavy photo edit. Try Nano Banana first (Gemini 2.5 Flash Image —
+  // best quality but paid), then fall back to Cloudflare Workers AI's
+  // SD-1.5 img2img (free tier, 10k neurons/day). NO text rendering here —
+  // image-gen models are unreliable at legible text. Text + graphics get
+  // composited by code in step 5.
   let editedPhoto = preparedBuffer
   let aiEditApplied = false
   let aiEditError: string | null = null
+  let aiEditProvider: 'nano-banana' | 'cloudflare' | null = null
+  const refitToAspect = async (buf: Buffer): Promise<Buffer> => {
+    const a = body.aspect ?? '4:5'
+    const W = 1080
+    const H = a === '1:1' ? 1080 : 1350
+    return sharp(buf).resize(W, H, { fit: 'cover', position: 'attention' }).toBuffer()
+  }
   if (aiDesignEnabled) {
+    // Try Nano Banana first
     try {
       const aiResult = await editPhotoHeavily({
         imageBuffer: preparedBuffer,
@@ -231,21 +242,39 @@ export async function POST(req: Request) {
         providers,
       })
       if (aiResult) {
-        // Re-fit to the requested aspect — the model can drift on dimensions
-        const aspect = body.aspect ?? '4:5'
-        const W = 1080
-        const H = aspect === '1:1' ? 1080 : 1350
-        editedPhoto = await sharp(aiResult)
-          .resize(W, H, { fit: 'cover', position: 'attention' })
-          .toBuffer()
+        editedPhoto = await refitToAspect(aiResult)
         aiEditApplied = true
+        aiEditProvider = 'nano-banana'
       } else {
         aiEditError = 'Nano Banana returned no image'
-        console.warn('[design] heavy edit returned null — using ungraded photo')
+        console.warn('[design] Nano Banana returned null')
       }
     } catch (err) {
-      aiEditError = (err as Error).message
-      console.warn('[design] heavy edit failed:', aiEditError)
+      aiEditError = `nano-banana: ${(err as Error).message}`
+      console.warn('[design] Nano Banana failed:', (err as Error).message)
+    }
+
+    // Cloudflare fallback when Nano Banana didn't apply (quota, refusal, etc.)
+    if (!aiEditApplied) {
+      try {
+        const cfResult = await cloudflareImageEdit({
+          imageBuffer: preparedBuffer,
+          prompt: moodToCloudflarePrompt(designDecisions?.mood ?? null),
+          strength: 0.4,
+        })
+        if (cfResult) {
+          editedPhoto = await refitToAspect(cfResult)
+          aiEditApplied = true
+          aiEditProvider = 'cloudflare'
+          aiEditError = null
+        } else if (!aiEditError) {
+          aiEditError = 'Cloudflare credentials not configured'
+        }
+      } catch (err) {
+        const cfMsg = `cloudflare: ${(err as Error).message}`
+        aiEditError = aiEditError ? `${aiEditError} | ${cfMsg}` : cfMsg
+        console.warn('[design] Cloudflare img2img failed:', (err as Error).message)
+      }
     }
   }
 
@@ -300,6 +329,7 @@ export async function POST(req: Request) {
     intensity: headline.intensity,
     template: template ?? null,
     ai_edit_applied: aiEditApplied,
+    ai_edit_provider: aiEditProvider,
     ai_edit_error: aiEditError,
     fonts_loaded: fontsLoaded,
     fonts_detail: fontsLoaded ? undefined : fontStatus,

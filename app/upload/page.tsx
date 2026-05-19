@@ -677,6 +677,8 @@ export default function UploadPage() {
         const flags: string[] = []
         if (result.ai_edit_applied === false) {
           flags.push(`AI edit skipped: ${result.ai_edit_error ?? 'unknown'}`)
+        } else if (result.ai_edit_provider) {
+          flags.push(`AI grade: ${result.ai_edit_provider}`)
         }
         if (result.fonts_loaded === false) {
           flags.push('fonts NOT loaded — text will be missing')
