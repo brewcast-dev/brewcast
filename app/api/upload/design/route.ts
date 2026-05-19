@@ -10,6 +10,8 @@ import { generateImageHeadline, type HeadlineResult } from '@/lib/ai/headline'
 import { DEFAULT_BRAND_CONTEXT } from '@/lib/ai/captions'
 import { composeDesignedImage, type DesignIntensity, type DesignTemplate, type ComparisonRow } from '@/lib/image-design'
 import { prepareImageForDesign } from '@/lib/creative-director'
+import { aiDesignImage } from '@/lib/ai/nano-banana'
+import sharp from 'sharp'
 import fs from 'fs'
 import path from 'path'
 
@@ -27,6 +29,9 @@ interface RequestBody {
   comparisons?: ComparisonRow[]   // Used when template === 'comparison'
   // Set to false to skip the Nano Banana grading pass (default: true)
   grading?: boolean
+  // Set to false to skip the full AI design pass and use only the templated
+  // compositor. Default: true (AI design runs first; falls back on failure).
+  aiDesign?: boolean
 }
 
 // Read optional brewery logo. Returns null if not present.
@@ -148,10 +153,10 @@ export async function POST(req: Request) {
     if (body.intensity) headline.intensity = body.intensity
   }
 
-  // 3. Creative director: trim borders, smart 1:1 crop, vision-driven design
-  // decisions, optional Nano Banana grading. Output is a clean 1080×1080
-  // buffer ready for the compositor + a `decisions` object the compositor
-  // uses for decorative choices.
+  // 3. Creative director: trim borders, smart crop, vision analysis.
+  // Skip grading here — if we're doing the full AI design pass below, that
+  // step handles color grading too (one Nano Banana call, not two).
+  const aiDesignEnabled = body.aiDesign !== false
   let preparedBuffer: Buffer
   let designDecisions = null as Awaited<ReturnType<typeof prepareImageForDesign>>['decisions'] | null
   try {
@@ -160,12 +165,11 @@ export async function POST(req: Request) {
       imageUrl: body.imageUrl,
       providers,
       brandContext,
-      enableGrading: body.grading !== false,
+      // Grading is folded into aiDesignImage when AI design is on
+      enableGrading: aiDesignEnabled ? false : (body.grading !== false),
     })
     preparedBuffer = prepared.buffer
     designDecisions = prepared.decisions
-    // If the creative director suggested an intensity and the caller didn't
-    // force one, honor it.
     if (!body.intensity && prepared.decisions.suggested_intensity) {
       headline.intensity = prepared.decisions.suggested_intensity
     }
@@ -174,29 +178,87 @@ export async function POST(req: Request) {
     preparedBuffer = imageBuffer
   }
 
-  // 4. Composite
   const logoBuffer = readLogoFromDisk()
   // Template: caller override > creative director > intensity fallback
   const template: DesignTemplate | undefined =
     body.template ?? designDecisions?.suggested_template ?? undefined
   // Kicker: caller override > vision suggestion > legacy badge field
   const kicker = body.kicker ?? designDecisions?.kicker ?? body.badge ?? headline.badge
-  let designedBuffer: Buffer
+
+  // 4. Try the FULL AI design pass first — Nano Banana renders headline,
+  // kicker, graphics, and color grading directly into the photo. This is
+  // the path that actually produces designs matching the reference posts.
+  // Falls back to the templated compositor on failure.
+  let designedBuffer: Buffer | null = null
+  let designPath: 'ai' | 'template' = 'template'
+  if (aiDesignEnabled) {
+    try {
+      const aiResult = await aiDesignImage({
+        imageBuffer: preparedBuffer,
+        headline: headline.headline,
+        subhead: headline.subhead ?? null,
+        kicker: kicker ?? null,
+        handle: body.handle ?? null,
+        mood: designDecisions?.mood ?? null,
+        brandContext,
+        template: template === 'comparison' ? 'bold-top' : (template ?? 'bold-top'),
+        providers,
+      })
+      if (aiResult) {
+        // Re-fit to the requested aspect (model can drift on dimensions),
+        // then overlay the real brewery logo on top for brand consistency.
+        const aspect = body.aspect ?? '4:5'
+        const W = aspect === '1:1' ? 1080 : 1080
+        const H = aspect === '1:1' ? 1080 : 1350
+        const fitted = await sharp(aiResult)
+          .resize(W, H, { fit: 'cover', position: 'attention' })
+          .toBuffer()
+        if (logoBuffer) {
+          // Use composeDesignedImage with empty text to get the consistent
+          // logo placement + processing (white-inversion of black-on-white).
+          designedBuffer = await composeDesignedImage({
+            imageBuffer: fitted,
+            headline: '',                 // headline already baked into the photo
+            subhead: undefined,
+            handle: undefined,            // handle also baked in by the model
+            template,
+            intensity: headline.intensity,
+            aspect,
+            logoBuffer,
+            // No decoratives or kicker — those are in the AI image now.
+            decorative: 'none',
+            headlineColor: null,
+          })
+        } else {
+          designedBuffer = fitted
+        }
+        designPath = 'ai'
+      } else {
+        console.warn('[design] aiDesignImage returned null — falling back to templated compositor')
+      }
+    } catch (err) {
+      console.warn('[design] aiDesignImage failed, falling back to templated compositor:', (err as Error).message)
+    }
+  }
+
+  // 5. Fallback: templated compositor (gradient + text-to-path + logo)
   try {
-    designedBuffer = await composeDesignedImage({
-      imageBuffer: preparedBuffer,
-      headline: headline.headline,
-      subhead: headline.subhead,
-      handle: body.handle,
-      kicker: kicker ?? undefined,
-      template,
-      intensity: headline.intensity,
-      aspect: body.aspect ?? '4:5',
-      comparisons: body.comparisons,
-      logoBuffer: logoBuffer ?? undefined,
-      decorative: designDecisions?.suggested_decorative,
-      headlineColor: designDecisions?.headline_color ?? null,
-    })
+    if (!designedBuffer) {
+      designedBuffer = await composeDesignedImage({
+        imageBuffer: preparedBuffer,
+        headline: headline.headline,
+        subhead: headline.subhead,
+        handle: body.handle,
+        kicker: kicker ?? undefined,
+        template,
+        intensity: headline.intensity,
+        aspect: body.aspect ?? '4:5',
+        comparisons: body.comparisons,
+        logoBuffer: logoBuffer ?? undefined,
+        decorative: designDecisions?.suggested_decorative,
+        headlineColor: designDecisions?.headline_color ?? null,
+      })
+    }
   } catch (err) {
     return NextResponse.json(
       { error: `Composite failed: ${(err as Error).message}` },
@@ -220,6 +282,9 @@ export async function POST(req: Request) {
     headline: headline.headline,
     subhead: headline.subhead ?? null,
     badge: headline.badge ?? null,
+    kicker: kicker ?? null,
     intensity: headline.intensity,
+    template: template ?? null,
+    design_path: designPath,
   })
 }
