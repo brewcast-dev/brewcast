@@ -11,17 +11,19 @@ import * as opentype from 'opentype.js'
 // librsvg doesn't see bundled fonts via fontconfig), we parse the TTF and
 // emit each glyph as an SVG <path>. Pure geometry — works everywhere.
 //
-// Three fonts bundled:
-//   - BrewDisplay  → Anton-Regular.ttf       (bold condensed display)
+// Four fonts bundled:
+//   - BrewDisplay  → Anton-Regular.ttf       (bold condensed display caps)
 //   - BrewSerif    → DMSerifDisplay-Italic.ttf (italic editorial serif)
 //   - BrewBody     → Inter-Variable.ttf       (clean sans for body/handle/badge)
+//   - BrewScript   → Allura-Regular.ttf       (flowing script for overlap words)
 
-export type FontKey = 'display' | 'serif' | 'body'
+export type FontKey = 'display' | 'serif' | 'body' | 'script'
 
 const FONT_FILES: Record<FontKey, string> = {
   display: 'Anton-Regular.ttf',
   serif: 'DMSerifDisplay-Italic.ttf',
   body: 'Inter-Variable.ttf',
+  script: 'Allura-Regular.ttf',
 }
 
 const _fontCache = new Map<FontKey, opentype.Font>()
@@ -68,7 +70,7 @@ function loadFont(key: FontKey): opentype.Font | null {
 export function loadAllFonts(): void {
   if (_fontsTried) return
   _fontsTried = true
-  for (const key of ['display', 'serif', 'body'] as const) loadFont(key)
+  for (const key of ['display', 'serif', 'body', 'script'] as const) loadFont(key)
 }
 
 // Diagnostic: what's the load status for each font?
@@ -78,6 +80,7 @@ export function getFontStatus(): Record<FontKey, { loaded: boolean; error?: stri
     display: _fontStatus.get('display') ?? { loaded: false, error: 'never attempted' },
     serif: _fontStatus.get('serif') ?? { loaded: false, error: 'never attempted' },
     body: _fontStatus.get('body') ?? { loaded: false, error: 'never attempted' },
+    script: _fontStatus.get('script') ?? { loaded: false, error: 'never attempted' },
   }
 }
 

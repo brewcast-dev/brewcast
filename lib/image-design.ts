@@ -79,7 +79,7 @@ const DEFAULT_COLORS: BrandColors = {
 
 const processedLogoCache = new WeakMap<Buffer, Buffer>()
 
-async function processLogoForWatermark(rawLogo: Buffer): Promise<Buffer> {
+export async function processLogoForWatermark(rawLogo: Buffer): Promise<Buffer> {
   const cached = processedLogoCache.get(rawLogo)
   if (cached) return cached
 

@@ -3,6 +3,7 @@ import { z } from 'zod'
 import type { createGoogleGenerativeAI } from '@ai-sdk/google'
 import type { createGroq } from '@ai-sdk/groq'
 import type { createMistral } from '@ai-sdk/mistral'
+import { recordAiUsage, type Provider } from './usage'
 
 // Vision call dedicated to design decisions (separate from photo-analysis.ts,
 // which is about *content* — subject, mood, filter suggestion). This call
@@ -109,15 +110,18 @@ export async function analyzeForDesign(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     model: any,
     label: string,
+    provider: Provider,
+    modelId: string,
   ): Promise<DesignAnalysis | null> => {
     try {
-      const { object } = await generateObject({
+      const res = await generateObject({
         model,
         schema: DesignAnalysisSchema,
         system: SYSTEM_PROMPT,
         messages: [{ role: 'user', content: imageContent }],
       })
-      return object
+      await recordAiUsage(res, { feature: 'design-vision', provider, model: modelId })
+      return res.object
     } catch (err) {
       console.warn(`[design-vision] ${label} failed:`, (err as Error).message.slice(0, 200))
       return null
@@ -127,11 +131,11 @@ export async function analyzeForDesign(
   // Gemini Flash is fastest for vision. Mistral + Groq don't support vision at
   // the same fidelity but the AI SDK can still try them — they'll likely fail
   // the image content step, which is fine, we use defaults then.
-  const fromGoogle = await tryProvider(google('gemini-2.5-flash'), 'gemini')
+  const fromGoogle = await tryProvider(google('gemini-2.5-flash'), 'gemini', 'google', 'gemini-2.5-flash')
   if (fromGoogle) return fromGoogle
 
   // Fallback chain (best-effort — these may not be vision-capable)
-  const fromMistral = await tryProvider(mistral('pixtral-12b-2409'), 'mistral-pixtral')
+  const fromMistral = await tryProvider(mistral('pixtral-12b-2409'), 'mistral-pixtral', 'mistral', 'pixtral-12b-2409')
   if (fromMistral) return fromMistral
 
   // Suppress unused-var lint without changing the providers object shape

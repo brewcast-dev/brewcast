@@ -3,6 +3,7 @@ import { z } from 'zod'
 import type { createGoogleGenerativeAI } from '@ai-sdk/google'
 import type { createGroq } from '@ai-sdk/groq'
 import type { createMistral } from '@ai-sdk/mistral'
+import { recordAiUsage } from './usage'
 
 export const PhotoAnalysisSchema = z.object({
   mood: z.string().describe('Overall mood: warm, cool, moody, vivid, fade, noir, golden, or neutral'),
@@ -49,39 +50,42 @@ export async function analyzePhoto(
   const errors: Record<string, string> = {}
 
   try {
-    const { object } = await generateObject({
+    const res = await generateObject({
       model: google('gemini-2.5-flash'),
       schema: PhotoAnalysisSchema,
       messages: [{ role: 'user', content: imageContent }],
       system: SYSTEM_PROMPT,
     })
-    return object
+    await recordAiUsage(res, { feature: 'photo-analysis', provider: 'google', model: 'gemini-2.5-flash' })
+    return res.object
   } catch (err) {
     errors.gemini = (err as Error).message
     console.warn('[analyzePhoto] Gemini failed, trying Groq:', errors.gemini)
   }
 
   try {
-    const { object } = await generateObject({
+    const res = await generateObject({
       model: groq('meta-llama/llama-4-scout-17b-16e-instruct'),
       schema: PhotoAnalysisSchema,
       messages: [{ role: 'user', content: imageContent }],
       system: SYSTEM_PROMPT,
     })
-    return object
+    await recordAiUsage(res, { feature: 'photo-analysis', provider: 'groq', model: 'meta-llama/llama-4-scout-17b-16e-instruct' })
+    return res.object
   } catch (err) {
     errors.groq = (err as Error).message
     console.warn('[analyzePhoto] Groq failed, trying Mistral:', errors.groq)
   }
 
   try {
-    const { object } = await generateObject({
+    const res = await generateObject({
       model: mistral('pixtral-12b-2409'),
       schema: PhotoAnalysisSchema,
       messages: [{ role: 'user', content: imageContent }],
       system: SYSTEM_PROMPT,
     })
-    return object
+    await recordAiUsage(res, { feature: 'photo-analysis', provider: 'mistral', model: 'pixtral-12b-2409' })
+    return res.object
   } catch (err) {
     errors.mistral = (err as Error).message
     console.error('[analyzePhoto] All three vision providers failed.', errors)

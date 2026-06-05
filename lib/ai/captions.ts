@@ -4,6 +4,7 @@ import type { createGoogleGenerativeAI } from '@ai-sdk/google'
 import type { createGroq } from '@ai-sdk/groq'
 import type { createMistral } from '@ai-sdk/mistral'
 import type { PhotoAnalysis } from './photo-analysis'
+import { recordAiUsage } from './usage'
 
 const SingleCaptionSchema = z.object({
   caption: z.string().describe('Instagram caption, 1-3 sentences, with emojis'),
@@ -81,21 +82,22 @@ async function runWithFallback<T>(
   const errors: Record<string, string> = {}
 
   try {
-    const { object } = await generateObject({
+    const res = await generateObject({
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       model: google('gemini-2.5-flash') as any,
       schema,
       system,
       prompt,
     })
-    return object as T
+    await recordAiUsage(res, { feature: label, provider: 'google', model: 'gemini-2.5-flash' })
+    return res.object as T
   } catch (err) {
     errors.gemini = (err as Error).message
     console.warn(`[${label}] Gemini failed, trying Groq:`, errors.gemini)
   }
 
   try {
-    const { object } = await generateObject({
+    const res = await generateObject({
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       model: groq('llama-3.3-70b-versatile') as any,
       schema,
@@ -106,21 +108,23 @@ async function runWithFallback<T>(
       // client-side.
       mode: 'json',
     })
-    return object as T
+    await recordAiUsage(res, { feature: label, provider: 'groq', model: 'llama-3.3-70b-versatile' })
+    return res.object as T
   } catch (err) {
     errors.groq = (err as Error).message
     console.warn(`[${label}] Groq failed, trying Mistral:`, errors.groq)
   }
 
   try {
-    const { object } = await generateObject({
+    const res = await generateObject({
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       model: mistral('mistral-small-latest') as any,
       schema,
       system,
       prompt,
     })
-    return object as T
+    await recordAiUsage(res, { feature: label, provider: 'mistral', model: 'mistral-small-latest' })
+    return res.object as T
   } catch (err) {
     errors.mistral = (err as Error).message
     console.error(`[${label}] All three providers failed.`, errors)

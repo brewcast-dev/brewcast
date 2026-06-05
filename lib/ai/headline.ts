@@ -2,6 +2,7 @@ import { generateObject } from 'ai'
 import { z } from 'zod'
 import type { PhotoAnalysis } from './photo-analysis'
 import type { CaptionProviders } from './captions'
+import { recordAiUsage } from './usage'
 
 // Wider bounds than ideal so generative models don't fail validation on
 // borderline outputs — we trim/sanitize after parsing. The strict-enum
@@ -85,15 +86,18 @@ export async function generateImageHeadline(
 
   try {
     const result = await tryModel(providers.google('gemini-2.5-flash'))
+    await recordAiUsage(result, { feature: 'headline', provider: 'google', model: 'gemini-2.5-flash' })
     return sanitize(result.object)
   } catch (geminiErr) {
     console.warn('[headline] Gemini failed, trying Groq:', (geminiErr as Error).message)
     try {
       const result = await tryModel(providers.groq('llama-3.3-70b-versatile') as unknown as ReturnType<typeof providers.google>)
+      await recordAiUsage(result, { feature: 'headline', provider: 'groq', model: 'llama-3.3-70b-versatile' })
       return sanitize(result.object)
     } catch (groqErr) {
       console.warn('[headline] Groq failed, trying Mistral:', (groqErr as Error).message)
       const result = await tryModel(providers.mistral('mistral-small-latest') as unknown as ReturnType<typeof providers.google>)
+      await recordAiUsage(result, { feature: 'headline', provider: 'mistral', model: 'mistral-small-latest' })
       return sanitize(result.object)
     }
   }
