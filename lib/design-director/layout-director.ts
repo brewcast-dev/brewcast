@@ -42,6 +42,11 @@ export interface DirectLayoutInput {
   brandContext?: string
   // Optional notes from an earlier vision pass to steer the director.
   hints?: VisionHints
+  // How many source photos are available. Stops the director from picking a
+  // multi-photo archetype (dual/3-up) when only one photo exists.
+  photoCount?: number
+  // Critique from the QA loop, fed back on a regeneration attempt.
+  feedback?: string
   model?: string
   userId?: string | null
 }
@@ -76,13 +81,24 @@ Match the spirit of these reference plans (one per archetype):
 ${examples}`
 }
 
-function buildUserText(hints?: VisionHints): string {
+function buildUserText(input: DirectLayoutInput): string {
+  const { hints, photoCount, feedback } = input
   const notes: string[] = []
   if (hints?.mood) notes.push(`Mood: ${hints.mood}`)
   if (hints?.subjects?.length) notes.push(`Subjects: ${hints.subjects.join(', ')}`)
   if (hints?.description) notes.push(`Description: ${hints.description}`)
+
+  // Constrain archetype to what the available photo count can support.
+  let photoRule = ''
+  if (typeof photoCount === 'number') {
+    if (photoCount < 2) photoRule = `Only ${photoCount} photo is available — do NOT use "dual-photo-script" or "editorial-3up"; use a single-photo archetype.`
+    else if (photoCount < 3) photoRule = `${photoCount} photos available — "editorial-3up" needs 3, so avoid it.`
+  }
+
   return [
     notes.length ? `Notes about the photo:\n${notes.join('\n')}` : '',
+    photoRule,
+    feedback ? `IMPORTANT — a previous attempt was rejected by QA. Fix this: ${feedback}` : '',
     'Design this post. Return the design plan exactly as specified by the schema.',
   ]
     .filter(Boolean)
@@ -107,7 +123,7 @@ export async function directLayout(input: DirectLayoutInput): Promise<DesignPlan
         role: 'user',
         content: [
           { type: 'image', image: new URL(input.imageUrl) },
-          { type: 'text', text: buildUserText(input.hints) },
+          { type: 'text', text: buildUserText(input) },
         ],
       },
     ],

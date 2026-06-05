@@ -10,6 +10,7 @@ import { generateImageHeadline, type HeadlineResult } from '@/lib/ai/headline'
 import { DEFAULT_BRAND_CONTEXT } from '@/lib/ai/captions'
 import { composeDesignedImage, type DesignIntensity, type DesignTemplate, type ComparisonRow } from '@/lib/image-design'
 import { prepareImageForDesign } from '@/lib/creative-director'
+import { runDesignDirector } from '@/lib/design-director/pipeline'
 import { editPhotoHeavily } from '@/lib/ai/nano-banana'
 import { cloudflareImageEdit, moodToCloudflarePrompt } from '@/lib/ai/cloudflare-edit'
 import { getFontStatus } from '@/lib/text-to-path'
@@ -34,6 +35,12 @@ interface RequestBody {
   // Set to false to skip the full AI design pass and use only the templated
   // compositor. Default: true (AI design runs first; falls back on failure).
   aiDesign?: boolean
+  // Opt-in to the new AI Design Director pipeline (photo -> AI design plan ->
+  // deterministic render -> vision QA). When true, this path runs instead of
+  // the legacy templated compositor below. Default false (legacy) until proven.
+  designDirector?: boolean
+  // Within the Design Director path: set false to skip the vision QA + regen.
+  qa?: boolean
 }
 
 // Last-resort headline so the design pipeline never dies just because all
@@ -120,6 +127,64 @@ export async function POST(req: Request) {
     mistral: createMistral({ apiKey: config.mistralApiKey }),
   }
   const brandContext = config.brandContext ?? DEFAULT_BRAND_CONTEXT
+
+  // ── AI Design Director path (opt-in via designDirector:true) ──────────────
+  // New pipeline: photo → AI design plan → deterministic render → vision QA.
+  // Internally falls back to a heuristic plan if the director fails, so it
+  // always returns an image. The legacy templated path below is untouched and
+  // remains the default until this is promoted.
+  if (body.designDirector) {
+    const logoBuffer = readLogoFromDisk()
+    // Optional vision hints from the photo registry (the director also sees
+    // the photo directly, so these are best-effort enrichment).
+    let hints: { mood?: string | null; subjects?: string[] | null; description?: string | null } | undefined
+    const { data: stored } = await supabase
+      .from('brewery_photos')
+      .select('mood, subjects, description')
+      .eq('user_id', user.id)
+      .eq('url', body.imageUrl)
+      .maybeSingle()
+    if (stored) hints = stored as typeof hints
+
+    try {
+      const result = await runDesignDirector({
+        imageUrl: body.imageUrl,
+        providers: { google: providers.google },
+        logo: logoBuffer,
+        brandContext,
+        hints,
+        enhance: body.grading !== false, // reuse the grading flag for the Claid pre-step
+        qa: body.qa !== false,
+        userId: user.id,
+      })
+
+      const filename = `designed_${user.id}_${Date.now()}.jpg`
+      const storagePath = `edited-posts/${filename}`
+      const { error: upErr } = await supabase.storage
+        .from('edited-posts')
+        .upload(storagePath, result.buffer, { contentType: 'image/jpeg', upsert: true })
+      if (upErr) return NextResponse.json({ error: upErr.message }, { status: 500 })
+      const { data: urlData } = supabase.storage.from('edited-posts').getPublicUrl(storagePath)
+
+      return NextResponse.json({
+        url: urlData.publicUrl,
+        pipeline: 'design-director',
+        archetype: result.plan.archetype,
+        headline: result.plan.textBlocks.map((b) => b.text).join(' / ') || null,
+        plan: result.plan,
+        qa: result.qa,
+        regenerated: result.regenerated,
+        used_fallback: result.usedFallback,
+        enhanced: !!result.enhancedUrl,
+        notes: result.notes,
+      })
+    } catch (err) {
+      return NextResponse.json(
+        { error: `Design Director failed: ${(err as Error).message}` },
+        { status: 500 },
+      )
+    }
+  }
 
   // 2. Resolve headline. If the caller passed one, use it as-is. Otherwise
   // look up the photo's stored analysis (or run vision inline) and ask the

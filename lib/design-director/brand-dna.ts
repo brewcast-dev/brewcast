@@ -134,8 +134,10 @@ export const LAYOUT = {
   logo: {
     position: 'top-center' as const,
     topFrac: 0.055,        // top inset of the logo
-    widthFrac: 0.16,       // logo target width as fraction of canvas width
-    zoneBottomFrac: 0.16,  // headlines start below this y-fraction
+    widthFrac: 0.24,       // logo target width as fraction of canvas width
+                           // (bumped from 0.16 — QA flagged the logo as too
+                           //  small/illegible at thumbnail size)
+    zoneBottomFrac: 0.18,  // headlines start below this y-fraction
   },
   // Named vertical bands a text block can anchor to.
   bands: ['top', 'upper-third', 'center', 'lower-third', 'bottom'] as const,
