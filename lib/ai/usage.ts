@@ -225,6 +225,43 @@ export async function getSpendSince(
   return sum
 }
 
+export interface FeatureSpend {
+  feature: string
+  model: string
+  calls: number
+  totalTokens: number
+  costInr: number
+}
+
+/**
+ * Spend grouped by feature + model since `sinceISO` (null = all time).
+ * Aggregated in JS (fine at this volume); sorted by cost desc.
+ */
+export async function getSpendByFeature(
+  sinceISO: string | null,
+  opts?: { provider?: Provider },
+): Promise<FeatureSpend[]> {
+  const supabase = createAdminClient()
+  let q = supabase.from('ai_usage').select('feature,model,total_tokens,cost_inr')
+  if (sinceISO) q = q.gte('created_at', sinceISO)
+  if (opts?.provider) q = q.eq('provider', opts.provider)
+  const { data, error } = await q
+  if (error) throw new Error(`ai_usage query failed: ${error.message}`)
+
+  const map = new Map<string, FeatureSpend>()
+  for (const r of (data ?? []) as Array<{ feature: string; model: string; total_tokens: number; cost_inr: number }>) {
+    const key = `${r.feature}|${r.model}`
+    const cur = map.get(key) ?? { feature: r.feature, model: r.model, calls: 0, totalTokens: 0, costInr: 0 }
+    cur.calls += 1
+    cur.totalTokens += Number(r.total_tokens) || 0
+    cur.costInr += Number(r.cost_inr) || 0
+    map.set(key, cur)
+  }
+  return Array.from(map.values())
+    .map((f) => ({ ...f, costInr: Number(f.costInr.toFixed(4)) }))
+    .sort((a, b) => b.costInr - a.costInr)
+}
+
 function monthStartISO(): string {
   const d = new Date()
   return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1)).toISOString()
