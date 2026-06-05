@@ -15,8 +15,6 @@ import { editPhotoHeavily } from '@/lib/ai/nano-banana'
 import { cloudflareImageEdit, moodToCloudflarePrompt } from '@/lib/ai/cloudflare-edit'
 import { getFontStatus } from '@/lib/text-to-path'
 import sharp from 'sharp'
-import fs from 'fs'
-import path from 'path'
 
 interface RequestBody {
   imageUrl: string
@@ -70,37 +68,19 @@ function heuristicHeadline(
   return { headline, intensity }
 }
 
-// Read optional brewery logo. Returns null if not present.
-function readLogoFromDisk(): Buffer | null {
-  const candidates = [
-    path.join(process.cwd(), 'public', 'brand', 'logo.png'),
-    path.join(process.cwd(), 'public', 'brand', 'logo.jpg'),
-  ]
-  for (const p of candidates) {
-    if (fs.existsSync(p)) {
-      try {
-        return fs.readFileSync(p)
-      } catch {
-        return null
-      }
-    }
+// Resolve the brewery logo: the per-user logo uploaded in Settings
+// (config.logoUrl). There is no shared/default logo — accounts without one get
+// no logo stamped (the renderer handles a null logo gracefully).
+async function loadUserLogo(logoUrl: string | null): Promise<Buffer | null> {
+  if (!logoUrl) return null
+  try {
+    const res = await fetch(logoUrl)
+    if (res.ok) return Buffer.from(await res.arrayBuffer())
+    console.warn(`[design] logo fetch ${res.status} for ${logoUrl}`)
+  } catch (err) {
+    console.warn('[design] logo fetch failed:', (err as Error).message)
   }
   return null
-}
-
-// Resolve the logo for this brewery: prefer the per-user logo uploaded in
-// Settings (config.logoUrl), fall back to the bundled disk logo.
-async function loadUserLogo(logoUrl: string | null): Promise<Buffer | null> {
-  if (logoUrl) {
-    try {
-      const res = await fetch(logoUrl)
-      if (res.ok) return Buffer.from(await res.arrayBuffer())
-      console.warn(`[design] logo fetch ${res.status} for ${logoUrl} — falling back to disk`)
-    } catch (err) {
-      console.warn('[design] logo fetch failed, falling back to disk:', (err as Error).message)
-    }
-  }
-  return readLogoFromDisk()
 }
 
 export async function POST(req: Request) {
