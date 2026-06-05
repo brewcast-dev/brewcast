@@ -35,9 +35,9 @@ interface RequestBody {
   // Set to false to skip the full AI design pass and use only the templated
   // compositor. Default: true (AI design runs first; falls back on failure).
   aiDesign?: boolean
-  // Opt-in to the new AI Design Director pipeline (photo -> AI design plan ->
-  // deterministic render -> vision QA). When true, this path runs instead of
-  // the legacy templated compositor below. Default false (legacy) until proven.
+  // The AI Design Director pipeline (photo -> AI design plan -> deterministic
+  // render -> vision QA) is now the DEFAULT. Set to false to force the legacy
+  // templated compositor instead.
   designDirector?: boolean
   // Within the Design Director path: set false to skip the vision QA + regen.
   qa?: boolean
@@ -128,12 +128,12 @@ export async function POST(req: Request) {
   }
   const brandContext = config.brandContext ?? DEFAULT_BRAND_CONTEXT
 
-  // ── AI Design Director path (opt-in via designDirector:true) ──────────────
+  // ── AI Design Director path (DEFAULT; opt out with designDirector:false) ──
   // New pipeline: photo → AI design plan → deterministic render → vision QA.
-  // Internally falls back to a heuristic plan if the director fails, so it
-  // always returns an image. The legacy templated path below is untouched and
-  // remains the default until this is promoted.
-  if (body.designDirector) {
+  // Internally falls back to a heuristic plan if the director fails, and on a
+  // hard failure here it falls through to the legacy templated path below, so
+  // a request never errors out.
+  if (body.designDirector !== false) {
     const logoBuffer = readLogoFromDisk()
     // Optional vision hints from the photo registry (the director also sees
     // the photo directly, so these are best-effort enrichment).
@@ -179,10 +179,10 @@ export async function POST(req: Request) {
         notes: result.notes,
       })
     } catch (err) {
-      return NextResponse.json(
-        { error: `Design Director failed: ${(err as Error).message}` },
-        { status: 500 },
-      )
+      // Hard failure (rare — the pipeline degrades internally at each stage).
+      // Fall through to the legacy templated compositor below rather than
+      // failing the request.
+      console.warn('[design] Design Director failed, falling back to legacy pipeline:', (err as Error).message)
     }
   }
 
