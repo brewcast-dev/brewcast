@@ -13,6 +13,8 @@ export interface BreweryConfig {
   meta_ig_user_id: string | null
   meta_access_token: string | null
   meta_fb_page_id: string | null
+  logo_url: string | null
+  logo_path: string | null
 }
 
 /** Fully resolved config with env-var fallbacks applied. */
@@ -25,6 +27,7 @@ export interface ResolvedConfig {
   metaIgUserId: string
   metaAccessToken: string
   metaFbPageId: string | null
+  logoUrl: string | null
 }
 
 export async function getUserConfig(userId: string): Promise<BreweryConfig | null> {
@@ -51,6 +54,7 @@ export function resolveConfig(config: BreweryConfig | null): ResolvedConfig {
     metaIgUserId: config?.meta_ig_user_id ?? process.env.META_IG_USER_ID ?? '',
     metaAccessToken: config?.meta_access_token ?? process.env.META_ACCESS_TOKEN ?? '',
     metaFbPageId: config?.meta_fb_page_id ?? process.env.META_FB_PAGE_ID ?? null,
+    logoUrl: config?.logo_url ?? null,
   }
 }
 

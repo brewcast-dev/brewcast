@@ -88,6 +88,21 @@ function readLogoFromDisk(): Buffer | null {
   return null
 }
 
+// Resolve the logo for this brewery: prefer the per-user logo uploaded in
+// Settings (config.logoUrl), fall back to the bundled disk logo.
+async function loadUserLogo(logoUrl: string | null): Promise<Buffer | null> {
+  if (logoUrl) {
+    try {
+      const res = await fetch(logoUrl)
+      if (res.ok) return Buffer.from(await res.arrayBuffer())
+      console.warn(`[design] logo fetch ${res.status} for ${logoUrl} — falling back to disk`)
+    } catch (err) {
+      console.warn('[design] logo fetch failed, falling back to disk:', (err as Error).message)
+    }
+  }
+  return readLogoFromDisk()
+}
+
 export async function POST(req: Request) {
   const session = createSessionClient()
   const { data: { user } } = await session.auth.getUser()
@@ -134,7 +149,7 @@ export async function POST(req: Request) {
   // hard failure here it falls through to the legacy templated path below, so
   // a request never errors out.
   if (body.designDirector !== false) {
-    const logoBuffer = readLogoFromDisk()
+    const logoBuffer = await loadUserLogo(config.logoUrl)
     // Optional vision hints from the photo registry (the director also sees
     // the photo directly, so these are best-effort enrichment).
     let hints: { mood?: string | null; subjects?: string[] | null; description?: string | null } | undefined
@@ -275,7 +290,7 @@ export async function POST(req: Request) {
     preparedBuffer = imageBuffer
   }
 
-  const logoBuffer = readLogoFromDisk()
+  const logoBuffer = await loadUserLogo(config.logoUrl)
   // Template: caller override > creative director > intensity fallback
   const template: DesignTemplate | undefined =
     body.template ?? designDecisions?.suggested_template ?? undefined

@@ -2,6 +2,7 @@
 import { createSessionClient } from '@/lib/supabase-server'
 import { getUserConfig } from '@/lib/get-user-config'
 import SettingsForm from './SettingsForm'
+import LogoUpload from './LogoUpload'
 
 export default async function SettingsPage() {
   const client = createSessionClient()
@@ -18,7 +19,10 @@ export default async function SettingsPage() {
           Configure API keys and brand identity for this brewery account.
         </p>
       </div>
-      <SettingsForm config={config} />
+      <div className="space-y-6">
+        <LogoUpload config={config} />
+        <SettingsForm config={config} />
+      </div>
     </main>
   )
 }
