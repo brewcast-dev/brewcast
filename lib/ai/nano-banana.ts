@@ -26,7 +26,20 @@ interface GeminiResponse {
       parts?: Array<GeminiImagePart | GeminiTextPart>
     }
   }>
+  usageMetadata?: {
+    promptTokenCount?: number
+    candidatesTokenCount?: number
+    totalTokenCount?: number
+  }
   error?: { message?: string; code?: number }
+}
+
+// Token usage pulled off the Gemini REST response, in the shape recordAiUsage
+// expects. Lets the caller meter image-generation spend.
+interface NanoUsage {
+  inputTokens?: number
+  outputTokens?: number
+  totalTokens?: number
 }
 
 const GRADING_PROMPT = (mood: string) => `Lightly enhance this brewery photo for an Instagram post. Apply professional but SUBTLE color grading appropriate for a "${mood}" mood:
@@ -78,17 +91,34 @@ async function callNanoBanana(
   imageBuffer: Buffer,
   apiKey: string,
 ): Promise<Buffer | null> {
+  return (await callNanoBananaMulti(prompt, [{ buffer: imageBuffer, mime: 'image/jpeg' }], apiKey)).image
+}
+
+export interface NanoBananaResult {
+  image: Buffer | null
+  usage?: NanoUsage
+  model: string
+}
+
+// Multi-image variant. Gemini 2.5 Flash Image accepts several input images in
+// one call (e.g. a source photo + the brand logo to composite). Images are
+// positional — the prompt must say what each one is and in what order.
+async function callNanoBananaMulti(
+  prompt: string,
+  images: Array<{ buffer: Buffer; mime?: string }>,
+  apiKey: string,
+): Promise<NanoBananaResult> {
   const body = {
     contents: [{
       role: 'user',
       parts: [
         { text: prompt },
-        {
+        ...images.map((img) => ({
           inlineData: {
-            mimeType: 'image/jpeg',
-            data: imageBuffer.toString('base64'),
+            mimeType: img.mime ?? 'image/jpeg',
+            data: img.buffer.toString('base64'),
           },
-        },
+        })),
       ],
     }],
     generationConfig: { responseModalities: ['IMAGE'] },
@@ -111,13 +141,22 @@ async function callNanoBanana(
   }
 
   const json = (await res.json()) as GeminiResponse
+  const um = json.usageMetadata
+  const usage: NanoUsage | undefined = um
+    ? {
+        inputTokens: um.promptTokenCount,
+        outputTokens: um.candidatesTokenCount,
+        totalTokens: um.totalTokenCount,
+      }
+    : undefined
+
   const parts = json.candidates?.[0]?.content?.parts ?? []
   for (const part of parts) {
     if ('inlineData' in part && part.inlineData?.data) {
-      return Buffer.from(part.inlineData.data, 'base64')
+      return { image: Buffer.from(part.inlineData.data, 'base64'), usage, model: MODEL }
     }
   }
-  return null
+  return { image: null, usage, model: MODEL }
 }
 
 /**
@@ -236,4 +275,79 @@ export async function aiDesignImage(opts: AiDesignOptions): Promise<Buffer | nul
     providers: opts.providers,
     explicitApiKey: opts.explicitApiKey,
   })
+}
+
+// ─── Full generative design (THE TEST) ──────────────────────────────────────
+// Unlike editPhotoHeavily/gradeImage — which explicitly FORBID text, logos,
+// and graphics — this asks the image model to produce a COMPLETE, finished
+// Instagram post: composition, brand styling, legible headline text, and the
+// real logo composited in. This is what "test modern generative" means: stop
+// using the model as a colour grader and see if it can actually design.
+
+export interface GenerateDesignOptions {
+  imageBuffer: Buffer
+  // Short on-image headline to render. If null, the model writes its own.
+  headline?: string | null
+  mood?: string | null
+  brandContext?: string | null
+  // The brewery's real logo, passed as a second input image so the model
+  // places the actual mark instead of hallucinating one. Optional.
+  logoBuffer?: Buffer | null
+  providers: Providers
+  explicitApiKey?: string
+}
+
+export function designPostPrompt(opts: { headline?: string | null; mood?: string | null; brandContext?: string | null; hasLogo: boolean }): string {
+  const mood = opts.mood ?? 'premium'
+  const headlineRule = opts.headline
+    ? `Render this exact headline as the on-image text, spelled letter-for-letter correctly: "${opts.headline}". Do not alter the wording.`
+    : `Write your own short, confident headline (1–6 words, no emojis, no hashtags, no exclamation marks) and render it as clean, legible on-image text.`
+  const logoRule = opts.hasLogo
+    ? `The SECOND image is District 6's exact logo. Composite THAT logo, unchanged, centered near the top of the canvas. Do NOT redraw, restyle, or invent a logo — use the one provided.`
+    : `Do not invent a brewery logo.`
+
+  return `You are a senior graphic designer producing a finished, premium Instagram post for District 6 — a pub brewery & kitchen${opts.brandContext ? ` (${opts.brandContext.trim().slice(0, 200)})` : ''}.
+
+The FIRST image is the source photograph — the hero of the post.
+${logoRule}
+
+Produce a COMPLETE, polished, ready-to-publish 4:5 portrait social post:
+- Treat the source photo professionally (clean composition, editorial colour grade, ${mood} mood). You may extend the scene into a dark espresso/black background if that improves the layout.
+- ${headlineRule}
+- Use confident, well-spaced typography with clear hierarchy. Text must be crisp and perfectly legible — no garbled or misspelled letters.
+- Keep it on-brand: dark, refined, craft-beer premium. Negative space is good. Do not clutter.
+
+This must look like a human graphic designer made it — not a photo with a filter. Output a single finished image.`
+}
+
+export interface GenerateDesignResult {
+  image: Buffer | null
+  // The exact prompt sent to the model — always returned so it can be surfaced
+  // in the API response and the UI (never hidden in code).
+  prompt: string
+  usage?: NanoUsage
+  model: string
+}
+
+/**
+ * Generate a fully designed, branded post from a source photo (and optional
+ * logo) using Gemini 2.5 Flash Image. Returns the image bytes (or null if the
+ * model declined), the EXACT prompt used, and token usage for metering.
+ * Throws on transport errors.
+ */
+export async function generateDesignedPost(opts: GenerateDesignOptions): Promise<GenerateDesignResult> {
+  const apiKey = opts.explicitApiKey ?? getGoogleApiKey(opts.providers)
+  if (!apiKey) {
+    throw new Error('No Google API key available for generative design')
+  }
+  const prompt = designPostPrompt({
+    headline: opts.headline,
+    mood: opts.mood,
+    brandContext: opts.brandContext,
+    hasLogo: !!opts.logoBuffer,
+  })
+  const images: Array<{ buffer: Buffer; mime?: string }> = [{ buffer: opts.imageBuffer, mime: 'image/jpeg' }]
+  if (opts.logoBuffer) images.push({ buffer: opts.logoBuffer, mime: 'image/png' })
+  const res = await callNanoBananaMulti(prompt, images, apiKey)
+  return { image: res.image, prompt, usage: res.usage, model: res.model }
 }

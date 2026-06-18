@@ -23,8 +23,8 @@ export interface CreativeDirectorOptions {
   providers: { google: any; groq: any; mistral: any }
   brandContext?: string
   enableGrading?: boolean          // Defaults true if Google API key is set
-  targetWidth?: number             // Output width (default 1080)
-  targetHeight?: number            // Output height (default 1350 for 4:5)
+  targetWidth?: number             // Output width (default 1440)
+  targetHeight?: number            // Output height (default 1800 for 4:5)
 }
 
 export interface CreativeDirectorResult {
@@ -123,8 +123,8 @@ async function smartCrop(
 export async function prepareImageForDesign(
   opts: CreativeDirectorOptions,
 ): Promise<CreativeDirectorResult> {
-  const targetW = opts.targetWidth ?? 1080
-  const targetH = opts.targetHeight ?? 1350   // 4:5 default
+  const targetW = opts.targetWidth ?? 1440
+  const targetH = opts.targetHeight ?? 1800   // 4:5 default
   const diagnostics: CreativeDirectorResult['diagnostics'] = {
     trimmed: false,
     cropped: null,

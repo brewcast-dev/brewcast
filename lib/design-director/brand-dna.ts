@@ -22,8 +22,14 @@ import type { FontKey } from '../text-to-path'
 export const CANVAS = {
   // 4:5 portrait is the dominant format in the feed; 1:1 is the fallback for
   // grid-tile or carousel cover use.
-  '4:5': { w: 1080, h: 1350 },
-  '1:1': { w: 1080, h: 1080 },
+  //
+  // Rendered at 1440 on the short edge (1.33× the old 1080). All layout values
+  // are canvas fractions, so the composition is identical — only the pixel
+  // density goes up, preserving more of the source photo's detail. 1440 is the
+  // effective ceiling: Instagram re-compresses anything wider back down for the
+  // feed, so going higher just wastes encode time and Claid upscale headroom.
+  '4:5': { w: 1440, h: 1800 },
+  '1:1': { w: 1440, h: 1440 },
 } as const
 
 export type AspectKey = keyof typeof CANVAS

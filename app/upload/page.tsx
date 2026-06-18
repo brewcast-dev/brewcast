@@ -38,6 +38,8 @@ interface DraftCard {
   designSubhead?: string | null
   designBadge?: string | null
   designIntensity?: 'subtle' | 'bold' | 'heavy'
+  designPrompt?: string | null   // Exact prompt sent to the generative model
+  designPipeline?: string | null // Which pipeline produced the image
   designing?: boolean            // True while the design step is in flight
 }
 
@@ -240,6 +242,18 @@ function PhotoCard({
               <p className="text-xs text-ash mt-0.5">{draft.designSubhead}</p>
             )}
           </div>
+        )}
+
+        {/* Exact prompt sent to the generative model — always visible. */}
+        {draft.designPrompt && (
+          <details className="rounded-lg border border-white/[0.06] bg-onyx px-3 py-2">
+            <summary className="text-[10px] text-ash uppercase tracking-wider cursor-pointer select-none">
+              AI prompt{draft.designPipeline ? ` · ${draft.designPipeline}` : ''}
+            </summary>
+            <pre className="mt-2 text-[11px] text-ash whitespace-pre-wrap break-words font-mono leading-relaxed">
+              {draft.designPrompt}
+            </pre>
+          </details>
         )}
 
         {/* Filter picker */}
@@ -656,6 +670,8 @@ export default function UploadPage() {
       subhead: string | null
       badge: string | null
       intensity: 'subtle' | 'bold' | 'heavy'
+      design_prompt?: string | null
+      pipeline?: string | null
     } | null> => {
       try {
         const res = await fetch('/api/upload/design', {
@@ -860,6 +876,8 @@ export default function UploadPage() {
             designSubhead: designed?.subhead ?? null,
             designBadge: designed?.badge ?? null,
             designIntensity: designed?.intensity,
+            designPrompt: designed?.design_prompt ?? null,
+            designPipeline: designed?.pipeline ?? null,
           }
         }),
       )

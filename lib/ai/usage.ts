@@ -46,6 +46,10 @@ const PRICING: Record<string, Rates> = {
   // Order doesn't matter — we explicitly pick the longest matching prefix.
   'gemini-3-pro': { input: 2.0, cachedInput: 0.5, output: 12.0 },
   'gemini-2.5-pro': { input: 1.25, cachedInput: 0.31, output: 10.0 },
+  // Image generation: output is billed as image tokens (~$30/1M ≈ $0.04 per
+  // 1024px image at ~1290 tokens). Longest-prefix match means this wins over
+  // plain "gemini-2.5-flash" for the image model id.
+  'gemini-2.5-flash-image': { input: 0.3, cachedInput: 0.075, output: 30.0 },
   'gemini-2.5-flash-lite': { input: 0.1, cachedInput: 0.025, output: 0.4 },
   'gemini-2.5-flash': { input: 0.3, cachedInput: 0.075, output: 2.5 },
 }

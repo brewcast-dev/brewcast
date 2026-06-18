@@ -11,7 +11,8 @@ import { DEFAULT_BRAND_CONTEXT } from '@/lib/ai/captions'
 import { composeDesignedImage, type DesignIntensity, type DesignTemplate, type ComparisonRow } from '@/lib/image-design'
 import { prepareImageForDesign } from '@/lib/creative-director'
 import { runDesignDirector } from '@/lib/design-director/pipeline'
-import { editPhotoHeavily } from '@/lib/ai/nano-banana'
+import { editPhotoHeavily, generateDesignedPost } from '@/lib/ai/nano-banana'
+import { recordAiUsage } from '@/lib/ai/usage'
 import { cloudflareImageEdit, moodToCloudflarePrompt } from '@/lib/ai/cloudflare-edit'
 import { getFontStatus } from '@/lib/text-to-path'
 import sharp from 'sharp'
@@ -39,6 +40,10 @@ interface RequestBody {
   designDirector?: boolean
   // Within the Design Director path: set false to skip the vision QA + regen.
   qa?: boolean
+  // Generative design (Gemini 2.5 Flash Image designs the whole post end-to-end)
+  // is the DEFAULT path. Set false to skip it and use the deterministic Design
+  // Director instead. On failure it falls through to the Design Director too.
+  generative?: boolean
 }
 
 // Last-resort headline so the design pipeline never dies just because all
@@ -123,7 +128,77 @@ export async function POST(req: Request) {
   }
   const brandContext = config.brandContext ?? DEFAULT_BRAND_CONTEXT
 
-  // ── AI Design Director path (DEFAULT; opt out with designDirector:false) ──
+  // ── Generative design path (DEFAULT; opt out with generative:false) ───────
+  // Gemini 2.5 Flash Image designs the entire post — composition, legible text,
+  // and the brewery's real logo composited in. On any failure (model declines,
+  // transport error) it falls THROUGH to the deterministic Design Director
+  // below, which itself falls through to the legacy compositor, so a request
+  // never errors out.
+  if (body.generative !== false) {
+    try {
+      const logoBuffer = await loadUserLogo(config.logoUrl)
+      // Best-effort mood hint from the photo registry (the model also sees the
+      // photo directly, so this is enrichment, not a hard dependency).
+      const { data: stored } = await supabase
+        .from('brewery_photos')
+        .select('mood')
+        .eq('user_id', user.id)
+        .eq('url', body.imageUrl)
+        .maybeSingle()
+      const mood = (stored as { mood: string | null } | null)?.mood ?? null
+
+      const gen = await generateDesignedPost({
+        imageBuffer,
+        headline: body.headline ?? null,
+        mood,
+        brandContext,
+        logoBuffer,
+        providers,
+        explicitApiKey: config.googleApiKey,
+      })
+
+      // Meter the image-generation spend (this path is billed per image).
+      if (gen.usage) {
+        await recordAiUsage(
+          { usage: gen.usage, response: { modelId: gen.model } },
+          { feature: 'generative-design', provider: 'google', model: gen.model, userId: user.id },
+        )
+      }
+
+      if (!gen.image) {
+        // Model declined / returned no image — fall through to the Design Director.
+        console.warn('[design] generative returned no image, falling through to Design Director')
+      } else {
+        // Re-encode and bound size without cropping (preserve the model's
+        // composition — a cover-crop would slice off the text/logo it placed).
+        const buffer = await sharp(gen.image)
+          .resize(1440, 1800, { fit: 'inside', withoutEnlargement: true })
+          .jpeg({ quality: 92 })
+          .toBuffer()
+
+        const filename = `designed_${user.id}_${Date.now()}.jpg`
+        const storagePath = `edited-posts/${filename}`
+        const { error: upErr } = await supabase.storage
+          .from('edited-posts')
+          .upload(storagePath, buffer, { contentType: 'image/jpeg', upsert: true })
+        if (upErr) return NextResponse.json({ error: upErr.message }, { status: 500 })
+        const { data: urlData } = supabase.storage.from('edited-posts').getPublicUrl(storagePath)
+
+        return NextResponse.json({
+          url: urlData.publicUrl,
+          pipeline: 'generative',
+          model: gen.model,
+          headline: body.headline ?? null,
+          // The exact prompt sent to the model — always surfaced per request.
+          design_prompt: gen.prompt,
+        })
+      }
+    } catch (err) {
+      console.warn('[design] generative path failed, falling through to Design Director:', (err as Error).message)
+    }
+  }
+
+  // ── AI Design Director path (fallback; also the path when generative:false) ──
   // New pipeline: photo → AI design plan → deterministic render → vision QA.
   // Internally falls back to a heuristic plan if the director fails, and on a
   // hard failure here it falls through to the legacy templated path below, so
@@ -288,8 +363,8 @@ export async function POST(req: Request) {
   let aiEditProvider: 'nano-banana' | 'cloudflare' | null = null
   const refitToAspect = async (buf: Buffer): Promise<Buffer> => {
     const a = body.aspect ?? '4:5'
-    const W = 1080
-    const H = a === '1:1' ? 1080 : 1350
+    const W = 1440
+    const H = a === '1:1' ? 1440 : 1800
     return sharp(buf).resize(W, H, { fit: 'cover', position: 'attention' }).toBuffer()
   }
   if (aiDesignEnabled) {

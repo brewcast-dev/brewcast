@@ -9,9 +9,12 @@ import { loadAllFonts, renderText, wrapTextToWidth, measureText } from './text-t
 
 // ─── Output config ──────────────────────────────────────────────────────────
 
-export const OUTPUT_W = 1080
-export const OUTPUT_H = 1350         // 4:5 portrait by default
-export const OUTPUT_SQUARE = 1080    // when caller wants 1:1
+// 1440 short edge (1.33× the old 1080) to preserve more source detail; matches
+// the Design Director's CANVAS. All overlay geometry is canvas-fraction based,
+// so the composition is unchanged — only the pixel density rises.
+export const OUTPUT_W = 1440
+export const OUTPUT_H = 1800         // 4:5 portrait by default
+export const OUTPUT_SQUARE = 1440    // when caller wants 1:1
 
 // ─── Template system ────────────────────────────────────────────────────────
 
