@@ -13,6 +13,8 @@ export interface BreweryConfig {
   meta_ig_user_id: string | null
   meta_access_token: string | null
   meta_fb_page_id: string | null
+  meta_ad_account_id: string | null
+  meta_ads_token: string | null
   logo_url: string | null
   logo_path: string | null
 }
@@ -27,6 +29,8 @@ export interface ResolvedConfig {
   metaIgUserId: string
   metaAccessToken: string
   metaFbPageId: string | null
+  metaAdAccountId: string | null
+  metaAdsToken: string | null
   logoUrl: string | null
 }
 
@@ -54,6 +58,8 @@ export function resolveConfig(config: BreweryConfig | null): ResolvedConfig {
     metaIgUserId: config?.meta_ig_user_id ?? process.env.META_IG_USER_ID ?? '',
     metaAccessToken: config?.meta_access_token ?? process.env.META_ACCESS_TOKEN ?? '',
     metaFbPageId: config?.meta_fb_page_id ?? process.env.META_FB_PAGE_ID ?? null,
+    metaAdAccountId: config?.meta_ad_account_id ?? process.env.META_AD_ACCOUNT_ID ?? null,
+    metaAdsToken: config?.meta_ads_token ?? process.env.META_ADS_TOKEN ?? null,
     logoUrl: config?.logo_url ?? null,
   }
 }

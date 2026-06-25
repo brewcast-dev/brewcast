@@ -41,6 +41,11 @@ const META_FIELDS: FieldDef[] = [
   { name: 'meta_fb_page_id', label: 'Facebook Page ID (optional)' },
 ]
 
+const ADS_FIELDS: FieldDef[] = [
+  { name: 'meta_ad_account_id', label: 'Ad Account ID', placeholder: 'act_1234567890' },
+  { name: 'meta_ads_token', label: 'Ads Access Token (Facebook app, ads_read scope)', textarea: true, rows: 3 },
+]
+
 function InputField({ field, config }: { field: FieldDef; config: BreweryConfig | null }) {
   const value = config?.[field.name] ?? ''
   const baseClass =
@@ -120,6 +125,18 @@ export default function SettingsForm({ config }: Props) {
           Required for publishing posts to Instagram and Facebook.
         </p>
         {META_FIELDS.map((f) => (
+          <InputField key={f.name} field={f} config={config} />
+        ))}
+      </Section>
+
+      <Section title="Ad Tracking (Meta Marketing API)">
+        <p className="text-xs text-ash">
+          Powers the <strong>Ads</strong> dashboard. This token is separate from the publishing
+          token above — it must come from a <strong>Facebook app</strong> with the{' '}
+          <code className="text-cream">ads_read</code> scope. Leave blank if you&apos;re not
+          tracking paid campaigns yet.
+        </p>
+        {ADS_FIELDS.map((f) => (
           <InputField key={f.name} field={f} config={config} />
         ))}
       </Section>

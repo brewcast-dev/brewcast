@@ -10,6 +10,7 @@ const NAV_LINKS = [
   { href: '/drafts',    label: 'Drafts'    },
   { href: '/chat',      label: 'Chat'      },
   { href: '/analytics', label: 'Analytics' },
+  { href: '/ads',       label: 'Ads'       },
 ]
 
 interface Props {

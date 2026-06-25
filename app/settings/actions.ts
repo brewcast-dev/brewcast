@@ -28,6 +28,8 @@ export async function saveSettings(formData: FormData): Promise<{ error?: string
     meta_ig_user_id: (formData.get('meta_ig_user_id') as string)?.trim() || null,
     meta_access_token: (formData.get('meta_access_token') as string)?.trim() || null,
     meta_fb_page_id: (formData.get('meta_fb_page_id') as string)?.trim() || null,
+    meta_ad_account_id: (formData.get('meta_ad_account_id') as string)?.trim() || null,
+    meta_ads_token: (formData.get('meta_ads_token') as string)?.trim() || null,
     updated_at: new Date().toISOString(),
   }
 
