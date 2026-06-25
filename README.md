@@ -18,9 +18,7 @@
 
 ---
 
-![BrewCast](docs/screenshot.svg)
-
-<!-- Tip: replace docs/screenshot.svg above with a real app screenshot (docs/screenshot.png) for extra portfolio polish. -->
+![BrewCast](docs/screenshot.png)
 
 
 ## What it does
