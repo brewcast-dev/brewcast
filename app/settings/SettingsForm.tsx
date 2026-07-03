@@ -14,6 +14,7 @@ interface FieldDef {
   placeholder?: string
   textarea?: boolean
   rows?: number
+  required?: boolean
 }
 
 const TEXT_FIELDS: FieldDef[] = [
@@ -28,16 +29,16 @@ const TEXT_FIELDS: FieldDef[] = [
 ]
 
 const AI_KEY_FIELDS: FieldDef[] = [
-  { name: 'google_api_key', label: 'Google Gemini API Key', placeholder: 'AIza…' },
-  { name: 'groq_api_key', label: 'Groq API Key', placeholder: 'gsk_…' },
-  { name: 'mistral_api_key', label: 'Mistral API Key', placeholder: 'mistral-…' },
+  { name: 'google_api_key', label: 'Google Gemini API Key', placeholder: 'AIza…', required: true },
+  { name: 'groq_api_key', label: 'Groq API Key (optional fallback)', placeholder: 'gsk_…' },
+  { name: 'mistral_api_key', label: 'Mistral API Key (optional fallback)', placeholder: 'mistral-…' },
 ]
 
 const META_FIELDS: FieldDef[] = [
   { name: 'meta_app_id', label: 'Meta App ID' },
   { name: 'meta_app_secret', label: 'Meta App Secret' },
-  { name: 'meta_ig_user_id', label: 'Instagram User ID' },
-  { name: 'meta_access_token', label: 'Meta Access Token (long-lived)', textarea: true, rows: 3 },
+  { name: 'meta_ig_user_id', label: 'Instagram User ID', required: true },
+  { name: 'meta_access_token', label: 'Meta Access Token (long-lived)', textarea: true, rows: 3, required: true },
   { name: 'meta_fb_page_id', label: 'Facebook Page ID (optional)' },
 ]
 
@@ -53,13 +54,17 @@ function InputField({ field, config }: { field: FieldDef; config: BreweryConfig 
 
   return (
     <div>
-      <label className="block text-sm font-medium text-bone mb-1.5">{field.label}</label>
+      <label className="block text-sm font-medium text-bone mb-1.5">
+        {field.label}
+        {field.required && <span className="text-red-400 ml-1" title="Required">*</span>}
+      </label>
       {field.textarea ? (
         <textarea
           name={field.name}
           defaultValue={value as string}
           rows={field.rows ?? 3}
           placeholder={field.placeholder}
+          required={field.required}
           className={`${baseClass} resize-y`}
         />
       ) : (
@@ -68,6 +73,7 @@ function InputField({ field, config }: { field: FieldDef; config: BreweryConfig 
           type="text"
           defaultValue={value as string}
           placeholder={field.placeholder}
+          required={field.required}
           className={baseClass}
         />
       )}
@@ -112,8 +118,9 @@ export default function SettingsForm({ config }: Props) {
 
       <Section title="AI API Keys">
         <p className="text-xs text-ash">
-          Leave blank to use the shared environment defaults. Fill in to override with keys
-          specific to this brewery account.
+          Each brewery uses its own keys — there&apos;s no shared fallback, so usage and cost
+          stay on this account. A <span className="text-cream">Google Gemini key</span> is
+          required; Groq and Mistral are optional fallbacks for caption generation.
         </p>
         {AI_KEY_FIELDS.map((f) => (
           <InputField key={f.name} field={f} config={config} />

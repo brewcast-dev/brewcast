@@ -128,6 +128,15 @@ export async function POST(req: Request) {
   }
   const brandContext = config.brandContext ?? DEFAULT_BRAND_CONTEXT
 
+  // Per-client keys are required (no operator-key fallback). Fail fast with an
+  // actionable message rather than a cryptic provider auth error mid-pipeline.
+  if (!config.googleApiKey) {
+    return NextResponse.json(
+      { error: 'No Google Gemini API key configured for this account. Add yours in Settings.' },
+      { status: 400 },
+    )
+  }
+
   // ── Generative design path (DEFAULT; opt out with generative:false) ───────
   // Gemini 2.5 Flash Image designs the entire post — composition, legible text,
   // and the brewery's real logo composited in. On any failure (model declines,

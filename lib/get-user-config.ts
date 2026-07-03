@@ -45,21 +45,27 @@ export async function getUserConfig(userId: string): Promise<BreweryConfig | nul
 }
 
 /**
- * Merges a user's DB config with env-var fallbacks.
- * Routes that need API keys should call getUserConfig() then resolveConfig().
+ * Resolves a user's config to concrete values.
+ *
+ * Per-client keys (AI + Meta) come ONLY from the brewery's own config row —
+ * there is deliberately NO env-var fallback for them, so a brewery that hasn't
+ * entered its own keys can never silently spend on / publish from the operator's
+ * accounts. Each tenant must bring its own keys (enforced in Settings). Shared
+ * infrastructure secrets (Supabase, app ids, queue secret) are read straight
+ * from process.env elsewhere — they are not per-client and never live here.
  */
 export function resolveConfig(config: BreweryConfig | null): ResolvedConfig {
   return {
     breweryName: config?.brewery_name ?? 'your brewery',
     brandContext: config?.brand_context ?? null,
-    googleApiKey: config?.google_api_key ?? process.env.GOOGLE_GENERATIVE_AI_API_KEY ?? '',
-    groqApiKey: config?.groq_api_key ?? process.env.GROQ_API_KEY ?? '',
-    mistralApiKey: config?.mistral_api_key ?? process.env.MISTRAL_API_KEY ?? '',
-    metaIgUserId: config?.meta_ig_user_id ?? process.env.META_IG_USER_ID ?? '',
-    metaAccessToken: config?.meta_access_token ?? process.env.META_ACCESS_TOKEN ?? '',
-    metaFbPageId: config?.meta_fb_page_id ?? process.env.META_FB_PAGE_ID ?? null,
-    metaAdAccountId: config?.meta_ad_account_id ?? process.env.META_AD_ACCOUNT_ID ?? null,
-    metaAdsToken: config?.meta_ads_token ?? process.env.META_ADS_TOKEN ?? null,
+    googleApiKey: config?.google_api_key ?? '',
+    groqApiKey: config?.groq_api_key ?? '',
+    mistralApiKey: config?.mistral_api_key ?? '',
+    metaIgUserId: config?.meta_ig_user_id ?? '',
+    metaAccessToken: config?.meta_access_token ?? '',
+    metaFbPageId: config?.meta_fb_page_id ?? null,
+    metaAdAccountId: config?.meta_ad_account_id ?? null,
+    metaAdsToken: config?.meta_ads_token ?? null,
     logoUrl: config?.logo_url ?? null,
   }
 }

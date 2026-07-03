@@ -33,6 +33,19 @@ export async function saveSettings(formData: FormData): Promise<{ error?: string
     updated_at: new Date().toISOString(),
   }
 
+  // Each brewery must bring its own keys — there's no operator-key fallback (see
+  // resolveConfig). These fields are what BrewCast needs to generate + publish
+  // for this account, so require them here rather than failing later mid-run.
+  const REQUIRED: Array<[keyof typeof payload, string]> = [
+    ['google_api_key', 'Google Gemini API Key'],
+    ['meta_ig_user_id', 'Instagram User ID'],
+    ['meta_access_token', 'Meta Access Token'],
+  ]
+  const missing = REQUIRED.filter(([key]) => !payload[key]).map(([, label]) => label)
+  if (missing.length > 0) {
+    return { error: `These fields are required: ${missing.join(', ')}` }
+  }
+
   // Upsert — creates on first save, updates on subsequent saves
   const { error } = await admin
     .from('brewery_configs')
